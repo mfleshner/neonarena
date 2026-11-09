@@ -308,7 +308,7 @@ const CONFIG = {
   },
   // Midway boss: one of `kinds` at random, `at` seconds into the run. Killing it drops a heal and an evolution chest.
   // Overload: screen-clearing charge earned by kills. Destroys everything on screen; bosses take a chunk of max HP instead.
-  overload: { killsPerCharge: 1000, maxCharges: 3, bossDamage: 0.1, cooldown: 1.5 },
+  overload: { startCharges: 1, killsPerCharge: 1000, maxCharges: 3, bossDamage: 0.1, cooldown: 1.5 },
   midBoss: {
     enabled: true, at: 300, spawnMul: 0.6, heal: 40,
     kinds: {
@@ -630,7 +630,7 @@ function newGame(){
     player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
     gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
-    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, ovCharges:0, ovKills:0, ovCd:0, wave:null,
+    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, ovCharges:CONFIG.overload.startCharges, ovKills:0, ovCd:0, wave:null,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
     shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, midBoss:null, midSpawned:false,
