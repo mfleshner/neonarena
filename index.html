@@ -286,6 +286,9 @@ const CONFIG = {
   },
 
   controls: { joystickZone: 0.45, joyRadius: 56, padDeadzone: 0.2, padAimThreshold: 0.35 },
+  // Music layers switch on at these run times (seconds). The boss track plays everything.
+  audio: { music: true, bpm: 112, bossBpm: 136, musicLevel: 0.8, pauseDuck: 0.35, maxSameSfx: 4,
+           layers: { pad: 0, hats: 0, bass: 45, kick: 120, arp: 240, snare: 360 } },
 };
 
 const UPGRADES = [
@@ -328,7 +331,7 @@ function compact(arr){ let j=0; for (let i=0;i<arr.length;i++){ if(!arr[i].dead)
 
 /* ---------- save data ---------- */
 const DEFAULT_SAVE = { shards:0, best:{ time:0, kills:0 }, wins:0, ship:'striker', owned:['striker'], perks:{},
-  settings:{ aim:'device', sound:true, vibrate:true, shake:true, damageNumbers:true, fps:false } };
+  settings:{ aim:'device', musicVol:.6, sfxVol:.9, sound:true, vibrate:true, shake:true, damageNumbers:true, fps:false } };
 function loadSave(){
   const s = JSON.parse(JSON.stringify(DEFAULT_SAVE));
   try {
@@ -342,31 +345,157 @@ function loadSave(){
 const SAVE = loadSave(), SET = SAVE.settings;
 function persist(){ try { localStorage.setItem('neonArena.save', JSON.stringify(SAVE)); } catch {} }
 
-/* ---------- audio + haptics ---------- */
-let AC = null, lastHitSfx = 0;
-function audioInit(){ if (AC) return; try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch {} }
-function tone(freq, dur, type='square', vol=0.04, slide=1, delay=0){
+/* ---------- audio: everything is synthesized, no files ---------- */
+let AC = null, BUS = null, NOISE = null;
+function audioInit(){
+  if (AC){ if (AC.state === 'suspended') AC.resume().catch(()=>{}); return; }
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    const g = () => AC.createGain();
+    BUS = { master:g(), sfx:g(), music:g(), duck:g() };
+    BUS.sfx.connect(BUS.master); BUS.music.connect(BUS.duck); BUS.duck.connect(BUS.master); BUS.master.connect(AC.destination);
+    const comp = AC.createDynamicsCompressor(); BUS.master.disconnect(); BUS.master.connect(comp); comp.connect(AC.destination);
+    NOISE = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+    const d = NOISE.getChannelData(0); for (let i=0;i<d.length;i++) d[i] = Math.random()*2 - 1;
+    audioLevels();
+  } catch { AC = null; }
+}
+let lastLevels = '';
+function audioLevels(){   // called each frame; only touches the graph when a setting changed
+  if (!AC) return;
+  const duck = S && (S.state === 'paused' || S.state === 'levelup' || S.state === 'debug') ? CONFIG.audio.pauseDuck : 1;
+  const key = `${SET.sound}|${SET.musicVol}|${SET.sfxVol}|${duck}`;
+  if (key === lastLevels) return; lastLevels = key;
+  const t = AC.currentTime;
+  BUS.master.gain.setTargetAtTime(SET.sound ? 1 : 0, t, .03);
+  BUS.sfx.gain.setTargetAtTime(SET.sfxVol, t, .03);
+  BUS.music.gain.setTargetAtTime(SET.musicVol * CONFIG.audio.musicLevel, t, .03);
+  BUS.duck.gain.setTargetAtTime(duck, t, .15);
+}
+// Same sound fired many times in one moment gets thinned out so big fights stay readable.
+const sfxRecent = {};
+function allow(name, max = CONFIG.audio.maxSameSfx, windowMs = 70){
+  const now = performance.now(), list = (sfxRecent[name] ||= []);
+  while (list.length && now - list[0] > windowMs) list.shift();
+  if (list.length >= max) return false;
+  list.push(now); return true;
+}
+function tone(freq, dur, type='square', vol=0.04, slide=1, delay=0, bus){
   if (!AC || !SET.sound) return;
   const t = AC.currentTime + delay, o = AC.createOscillator(), g = AC.createGain();
   o.type = type; o.frequency.setValueAtTime(freq, t);
   if (slide !== 1) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq*slide), t+dur);
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-  o.connect(g).connect(AC.destination); o.start(t); o.stop(t+dur+0.02);
+  o.connect(g).connect(bus || BUS.sfx); o.start(t); o.stop(t+dur+0.02);
 }
+// filtered noise burst: type 'highpass' | 'lowpass' | 'bandpass'; sweepTo moves the filter over the sound
+function noise(dur, vol=.05, type='highpass', freq=2000, delay=0, sweepTo=0, Q=1, bus){
+  if (!AC || !SET.sound) return;
+  const t = AC.currentTime + delay, src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  src.buffer = NOISE; src.loop = true; f.type = type; f.Q.value = Q; f.frequency.setValueAtTime(freq, t);
+  if (sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo, t+dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  src.connect(f).connect(g).connect(bus || BUS.sfx); src.start(t, Math.random()*.5); src.stop(t+dur+.02);
+}
+const KILL_PITCH = { drone:520, dart:780, block:390, hexer:240, spitter:640, shard:980 };
+let gemCombo = 0, gemComboT = 0;
 const sfx = {
-  shoot(big){ tone(big ? 520 : 920, big ? .14 : .07, 'square', big ? .05 : .035, .45); },
-  empty(){ tone(180, .05, 'square', .03, .9); },
-  hit(){ const n = performance.now(); if (n - lastHitSfx < 45) return; lastHitSfx = n; tone(260, .05, 'triangle', .03, .6); },
-  kill(){ tone(520, .08, 'sawtooth', .02, .3); },
-  reload(){ tone(300, .05, 'square', .03, 1.6); tone(600, .05, 'square', .03, 1.2, .07); },
-  hurt(){ tone(140, .2, 'sawtooth', .06, .5); },
-  gem(){ tone(1300 + Math.random()*300, .04, 'sine', .02, 1.4); },
-  level(){ [523,659,784,1047].forEach((f,i)=>tone(f, .12, 'square', .035, 1, i*.07)); },
-  nova(){ tone(200, .3, 'sine', .06, 3); },
-  boss(){ [110,98,82].forEach((f,i)=>tone(f, .5, 'sawtooth', .06, .8, i*.35)); },
-  charge(){ tone(90, .5, 'sawtooth', .05, 2.5); },
+  shoot(big){
+    if (big){ tone(520, .16, 'square', .05, .4); tone(90, .22, 'sine', .14, .5); noise(.12, .07, 'lowpass', 3000, 0, 300); return; }
+    tone(920, .07, 'square', .03, .45); noise(.03, .04, 'highpass', 4000);
+  },
+  empty(){ noise(.02, .05, 'bandpass', 2400, 0, 0, 6); tone(180, .04, 'square', .02, .9); },
+  hit(crit){
+    if (crit){ if (!allow('crit', 3)) return; tone(1400, .08, 'triangle', .035, 1.6); tone(2100, .05, 'sine', .02, 1, .02); return; }
+    if (!allow('hit', 3, 50)) return; tone(260, .05, 'triangle', .028, .6);
+  },
+  kill(e){
+    if (e && e.elite){ noise(.5, .12, 'lowpass', 2000, 0, 120); tone(160, .45, 'sawtooth', .06, .25); tone(60, .4, 'sine', .15, .5); return; }
+    if (!allow('kill', 4)) return;
+    const f = (KILL_PITCH[e?.type] || 520) * (0.94 + Math.random()*.12);
+    tone(f, .08, e?.type === 'spitter' ? 'triangle' : 'sawtooth', .022, .3);
+    if (e && e.r >= 13) noise(.08, .03, 'lowpass', 1500, 0, 200);
+  },
+  reloadStart(){ noise(.03, .05, 'bandpass', 1800, 0, 0, 5); tone(420, .03, 'square', .015, .8); },
+  reload(){ noise(.03, .06, 'bandpass', 1200, 0, 0, 5); tone(300, .04, 'square', .025, 1.6); noise(.04, .07, 'bandpass', 2600, .07, 0, 5); tone(640, .05, 'square', .03, 1.2, .07); },
+  hurt(){ tone(140, .2, 'sawtooth', .06, .5); noise(.15, .08, 'lowpass', 1800, 0, 200); },
+  gem(){
+    if (!allow('gem', 3, 40)) return;
+    const now = performance.now(); gemCombo = now - gemComboT < 350 ? Math.min(gemCombo + 1, 14) : 0; gemComboT = now;
+    tone(1100 * Math.pow(2, gemCombo/24), .05, 'sine', .022, 1.3);
+  },
+  level(){ [523,659,784,1047].forEach((f,i) => { tone(f, .18, 'triangle', .04, 1, i*.07); tone(f*2, .1, 'sine', .015, 1, i*.07 + .01); tone(f, .14, 'triangle', .015, 1, i*.07 + .22); }); },
+  nova(){ noise(.35, .09, 'bandpass', 300, 0, 3000, 2); tone(120, .3, 'sine', .1, 2.5); },
+  siren(){ for (let i=0;i<3;i++){ tone(220, .45, 'sawtooth', .05, 2, i*.55); tone(440, .45, 'sawtooth', .03, .5, i*.55 + .22); } },
+  boss(){ sfx.siren(); [110,98,82].forEach((f,i) => tone(f, .6, 'sawtooth', .06, .8, 1.7 + i*.35)); noise(1.4, .08, 'lowpass', 200, 1.7, 2500); },
+  charge(){ tone(90, .5, 'sawtooth', .05, 2.5); noise(.5, .05, 'bandpass', 200, 0, 2000, 3); },
+  heartbeat(){ tone(70, .12, 'sine', .22, .6); tone(62, .14, 'sine', .18, .6, .16); },
   buy(){ tone(880, .08, 'square', .03, 1.5); tone(1320, .1, 'square', .03, 1, .08); },
+  death(){ noise(1.2, .14, 'lowpass', 3000, 0, 80); tone(220, 1, 'sawtooth', .06, .2); tone(55, .9, 'sine', .2, .6); },
+  win(){ [523,659,784,1047,1319].forEach((f,i) => { tone(f, .35, 'triangle', .045, 1, i*.11); tone(f/2, .35, 'sawtooth', .02, 1, i*.11); }); },
 };
+
+/* ---------- music: a step sequencer that builds layers as the run goes on ---------- */
+const midiF = m => 440 * Math.pow(2, (m - 69)/12);
+const SONGS = {
+  // each bar: [bass root, chord notes]
+  run:  [[45,[57,60,64]], [41,[57,60,65]], [48,[55,60,64]], [43,[55,59,62]]],   // Am F C G
+  boss: [[38,[62,65,69]], [34,[62,65,70]], [43,[62,67,70]], [45,[61,64,69]]],   // Dm Bb Gm A
+};
+const mus = { mode:'off', step:0, nextT:0 };
+let hbT = 0;
+function musicMode(){
+  if (!S) return 'off';
+  if (['play','levelup','paused'].includes(S.state)) return S.bossPhase ? 'boss' : 'run';
+  if (S.state === 'menu') return 'menu';
+  return 'off';
+}
+function layerOn(name){
+  if (mus.mode === 'boss') return true;
+  if (mus.mode === 'menu') return name === 'pad' || name === 'arpSoft';
+  return S.t >= (CONFIG.audio.layers[name] ?? 0);
+}
+function voice(type, freq, t, dur, vol, cutoff, attack=.005){
+  const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t); f.type = 'lowpass'; f.frequency.setValueAtTime(cutoff, t); f.Q.value = 3;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(f).connect(g).connect(BUS.music); o.start(t); o.stop(t + dur + .05);
+  return o;
+}
+function drum(kind, t){
+  if (kind === 'kick'){ const o = AC.createOscillator(), g = AC.createGain(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + .12);
+    g.gain.setValueAtTime(.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + .28); o.connect(g).connect(BUS.music); o.start(t); o.stop(t + .3); return; }
+  const src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(), hat = kind === 'hat';
+  src.buffer = NOISE; f.type = 'highpass'; f.frequency.value = hat ? 7000 : 1300;
+  g.gain.setValueAtTime(hat ? .06 : .22, t); g.gain.exponentialRampToValueAtTime(0.0001, t + (hat ? .04 : .14));
+  src.connect(f).connect(g).connect(BUS.music); src.start(t, Math.random()*.5); src.stop(t + .16);
+  if (!hat) voice('triangle', 190, t, .1, .08, 2000);
+}
+function playStep(step, t, six){
+  const boss = mus.mode === 'boss', song = boss ? SONGS.boss : SONGS.run;
+  const bar = Math.floor(step/16) % 4, s = step % 16, [root, chord] = song[bar];
+  if (s === 0 && layerOn('pad')) for (const n of chord){ voice('sawtooth', midiF(n), t, six*16, .022, 900, .35); voice('sawtooth', midiF(n)*1.006, t, six*16, .018, 900, .35); }
+  if (mus.mode === 'menu'){ if (s % 4 === 0) voice('triangle', midiF(chord[(s/4) % 3] + 12), t, six*3, .03, 3000); return; }
+  const fast = boss || layerOn('snare');
+  if (layerOn('hats') && (fast || s % 2 === 0)) drum('hat', t);
+  if (layerOn('kick') && s % 4 === 0) drum('kick', t);
+  if (layerOn('snare') && (s === 4 || s === 12)) drum('snare', t);
+  if (layerOn('bass') && s % 2 === 0){ const up = boss ? s % 8 === 6 : s % 8 === 4; voice('sawtooth', midiF(root + (up ? 12 : 0)), t, six*1.8, .1, boss ? 900 : 650); }
+  if (layerOn('arp')){ const pat = [0,1,2,1,0,2,1,2], n = chord[pat[s % 8] % 3] + 12 + (s >= 8 && boss ? 12 : 0); voice('square', midiF(n), t, six*.9, .028, boss ? 3500 : 2400); }
+}
+function musicTick(){
+  if (!AC || !SET.sound) return;
+  const mode = CONFIG.audio.music ? musicMode() : 'off';
+  if (mode !== mus.mode){ mus.mode = mode; mus.step = 0; mus.nextT = AC.currentTime + .1; }
+  if (mus.mode !== 'off' && SET.musicVol > 0){
+    const six = 60 / (mus.mode === 'boss' ? CONFIG.audio.bossBpm : CONFIG.audio.bpm) / 4;
+    if (mus.nextT < AC.currentTime) mus.nextT = AC.currentTime + .02;   // catch up after the tab was hidden
+    while (mus.nextT < AC.currentTime + .15){ playStep(mus.step, mus.nextT, six); mus.step++; mus.nextT += six; }
+  }
+  // low-HP heartbeat
+  if (S.state === 'play' && S.player.hp / S.player.maxHp < .3){ hbT -= 1/60; if (hbT <= 0){ hbT = .85; sfx.heartbeat(); } } else hbT = 0;
+}
+
 function buzz(ms){ try { if (SET.vibrate) navigator.vibrate?.(ms); } catch {} }
 function goFullscreen(){   // Chrome on Android: real fullscreen + landscape lock (silently skipped where refused)
   try {
@@ -498,6 +627,8 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
 window.addEventListener('pointerdown', () => document.body.classList.remove('pad'), true);
+window.addEventListener('pointerdown', audioInit, true);   // browsers only allow audio after a tap or key press
+window.addEventListener('keydown', audioInit, true);
 
 /* ---------- controller (standard mapping: Xbox-style layout) ---------- */
 const gp = { mx:0, my:0, aim:0, aimSet:false, prev:[], navT:0, navDir:'' };
@@ -645,7 +776,7 @@ function damageEnemy(e, dmg, nx, ny, crit=false){
   e.hp -= dmg; e.flash = .07;
   const kb = CONFIG.gun.knockback * (e.boss ? 0 : e.elite ? .15 : 1); e.kx += nx*kb; e.ky += ny*kb;
   if (SET.damageNumbers && S.texts.length < 60) S.texts.push({ x:e.x + rand(-4,4), y:e.y - e.r, txt:Math.round(dmg) + (crit ? '!' : ''), crit, life:.55, dead:false });
-  sfx.hit();
+  sfx.hit(crit);
   if (e.hp <= 0) killEnemy(e);
 }
 function killEnemy(e){
@@ -655,7 +786,7 @@ function killEnemy(e){
   if (e.xp > 0) dropGem(e.x, e.y, e.xp, 'xp');
   if (e.elite && !e.boss){ dropGem(e.x + 12, e.y, 30, 'heal'); if (SET.shake) S.shake = Math.min(16, S.shake + 6); S.hitstop = .06; }
   for (let i=0;i<e.splits;i++){ const a = i/e.splits*TAU, c = spawnEnemy(e.splitInto, e.x + Math.cos(a)*8, e.y + Math.sin(a)*8); c.kx = Math.cos(a)*160; c.ky = Math.sin(a)*160; c.spawnT = 0; }
-  sfx.kill();
+  sfx.kill(e);
   if (e.boss){ S.hitstop = .25; S.flash = .5; ring(e.x, e.y, 260, '#ffffff', 1); beginEnd(true); }
 }
 function dropGem(x,y,v,kind){
@@ -740,7 +871,7 @@ function update(dt){
     S.reloadT -= dt;
     if (S.reloadT <= 0){ S.reloading = false; S.ammo = G.magSize; S.freshReady = true; sfx.reload(); }
   } else if (S.ammo < G.magSize && (S.ammo === 0 ? S.cooldown <= 0 : S.idle >= G.reloadDelay)){
-    S.reloading = true; S.reloadT = G.reloadTime; S.queued = false;
+    S.reloading = true; S.reloadT = G.reloadTime; S.queued = false; sfx.reloadStart();
   }
   if (S.queued && S.cooldown <= 0 && !S.reloading && S.ammo > 0) fire();
 
@@ -1157,6 +1288,12 @@ function buildToggles(){
     aim.textContent = AIM_LABEL[SET.aim] || AIM_LABEL.device;
     aim.addEventListener('click', () => { SET.aim = AIM_MODES[(AIM_MODES.indexOf(SET.aim) + 1) % AIM_MODES.length]; persist(); keepFocus(buildToggles); });
     box.appendChild(aim);
+    for (const [k, label] of [['musicVol','MUSIC'],['sfxVol','SFX']]){
+      const v = document.createElement('button'); v.type = 'button'; v.className = 'ghost';
+      v.textContent = `${label} ${Math.round(SET[k]*100)}%`;
+      v.addEventListener('click', () => { audioInit(); SET[k] = SET[k] >= .99 ? 0 : Math.round((SET[k] + .2)*10)/10; if (SET[k] > 1) SET[k] = 1; persist(); keepFocus(buildToggles); if (k === 'sfxVol') sfx.gem(); });
+      box.appendChild(v);
+    }
     for (const [k, label] of TOGGLES){
       const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost';
       b.setAttribute('aria-pressed', String(!!SET[k])); b.textContent = `${label} ${SET[k] ? 'ON' : 'OFF'}`;
@@ -1200,8 +1337,8 @@ function beginEnd(won){
   if (S.state === 'ending' || S.state === 'over') return;
   S.state = 'ending'; S.endWon = won; S.endT = won ? 2 : 1.5; resetJoy(); clearRun();
   const P = S.player;
-  if (!won){ burst(P.x, P.y, S.color, 70, 420); burst(P.x, P.y, '#ffffff', 30, 300); ring(P.x, P.y, 120, S.color, .8); S.shake = SET.shake ? 18 : 0; buzz([60,40,120]); }
-  else { sfx.level(); buzz([40,30,40,30,120]); }
+  if (!won){ sfx.death(); burst(P.x, P.y, S.color, 70, 420); burst(P.x, P.y, '#ffffff', 30, 300); ring(P.x, P.y, 120, S.color, .8); S.shake = SET.shake ? 18 : 0; buzz([60,40,120]); }
+  else { sfx.win(); buzz([40,30,40,30,120]); }
 }
 function finishRun(){
   S.state = 'over'; clearRun();
@@ -1349,6 +1486,7 @@ function frame(now){
   const raw = Math.max(.001, (now - last)/1000), dt = Math.min(raw, 1/30); last = now;
   fpsSmooth = fpsSmooth*.95 + (1/raw)*.05;
   pollPad(raw);
+  audioLevels(); musicTick();
   const portrait = portraitMQ.matches;
   document.body.classList.toggle('portrait', portrait);
   if (S.hitstop > 0) S.hitstop -= raw;

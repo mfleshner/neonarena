@@ -20,11 +20,11 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Every tunable number lives in `CONFIG` at the top of the script. Add new numbers there, not inline.
 
 ## Script map (in order)
-- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, spawn, difficulty, elite, boss, xp, enemies, controls
+- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, spawn, difficulty, elite, boss, xp, enemies, controls, audio
 - `UPGRADES` — in-run level-up choices (`id`, `name`, `desc`, `max`, `apply()` mutates `S`)
 - Canvas setup: `resize()` sets `W`, `H`, `DPR`, `SC` (world→screen scale = H / view.height)
 - Save data: `SAVE` (localStorage `neonArena.save`: shards, best, wins, ship, owned, perks, settings); `SET = SAVE.settings`; `persist()`
-- Audio: Web Audio synth `tone()`, `sfx.*`; `buzz()` vibration; `goFullscreen()` (fullscreen + landscape lock on Android)
+- Audio (all synthesized): buses `BUS.master/sfx/music/duck` with a compressor; `audioLevels()` applies `SET.sound`, `SET.musicVol`, `SET.sfxVol` and ducks music when paused; `tone()`, `noise()`, `allow()` (limits the same sound in a burst); `sfx.*`. Music: `SONGS` (4-bar chord loops), step sequencer `playStep()` / `musicTick()` (called each frame, schedules 0.15s ahead), layers switch on by run time from `CONFIG.audio.layers`, boss track in boss phase, low-HP heartbeat. `buzz()` vibration; `goFullscreen()` (fullscreen + landscape lock on Android)
 - Sprites: `SHAPES`, `sprite(shape,color,r)` pre-renders glowing shapes to cached canvases (do NOT use per-frame shadowBlur, it kills phone FPS)
 - Spatial grid: `gridBuild(list)`, `gridQuery(x,y,r,fn)` — used for all enemy collisions
 - State: `newGame()` builds `S` (player, gun copy, arrays: enemies, bullets, eshots, gems, parts, texts, rings, ripples; flags: bossPhase, boss, state)

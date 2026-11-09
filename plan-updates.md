@@ -14,7 +14,8 @@ Tune the game on the phone without editing code.
 - "Reset" button to go back to the defaults
 - Works with touch, mouse and controller
 
-## 2. Sound pass
+## 2. Sound pass ✅ done
+(Volumes are cycle buttons in Options/pause: MUSIC and SFX in 20% steps. Layers: pad + hats from start, bass 0:45, kick 2:00, arp 4:00, snare 6:00. Tune in `CONFIG.audio`.)
 Replace the placeholder beeps.
 
 - Background music: a looping synthwave track generated in code (bass line, arpeggio, drums), no audio files
