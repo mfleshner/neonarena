@@ -69,6 +69,16 @@ button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 #dbgOut{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;font:12px/1.5 var(--ui);padding:8px;resize:none;-webkit-user-select:text;user-select:text}
 body.pad .screen button:focus{outline:2px solid var(--cyan);outline-offset:3px;box-shadow:0 0 16px rgba(63,243,255,.4)}
 .bottom{display:flex;justify-content:flex-end}
+.rightcol{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.ov{pointer-events:auto;display:grid;grid-template-columns:1fr auto;align-items:center;gap:3px 12px;min-width:124px;font-family:var(--ui);color:var(--dim);
+  background:rgba(7,6,15,.6);border:1px solid var(--line);border-radius:6px;padding:7px 10px;cursor:pointer;text-align:left}
+.ov .ovname{font-size:10px;font-weight:700;letter-spacing:.2em}
+.ov b{font-size:18px;line-height:1;font-variant-numeric:tabular-nums}
+.ovbar{grid-column:1/-1;display:block;height:3px;background:var(--line);border-radius:2px;overflow:hidden}
+.ovbar i{display:block;height:100%;width:0;background:var(--violet);box-shadow:0 0 6px var(--violet)}
+.ov.ready{color:#fff;border-color:var(--violet);box-shadow:0 0 14px rgba(169,139,255,.5);animation:ovpulse 1.4s ease-in-out infinite}
+@keyframes ovpulse{50%{box-shadow:0 0 26px rgba(169,139,255,.85)}}
+@media (prefers-reduced-motion:reduce){.ov.ready{animation:none}}
 .ammo{font-weight:700;font-size:13px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 8px rgba(63,243,255,.6);font-variant-numeric:tabular-nums;min-width:120px;text-align:right}
 .ammo.reload{color:var(--amber);text-shadow:0 0 8px rgba(255,194,61,.6)}
 .ammo.empty{color:var(--danger)}
@@ -137,7 +147,12 @@ body.portrait #rotate{display:grid}
     <div class="clock"><span class="lbl" id="clockLbl">SURVIVE</span><b id="timer">10:00</b><span class="kills" id="kills">0 KILLS</span></div>
     <div class="btns"><button id="muteBtn" type="button">SFX ON</button><button id="pauseBtn" type="button" aria-label="Pause">II</button></div>
   </div>
-  <div class="bottom"><div class="ammo" id="ammo">6 / 6</div></div>
+  <div class="bottom"><div class="rightcol">
+    <button class="ov" id="ovBtn" type="button" tabindex="-1" aria-label="Overload: destroy every enemy on screen">
+      <span class="ovname">OVERLOAD</span><b id="ovCount">0</b><i class="ovbar"><i id="ovFill"></i></i>
+    </button>
+    <div class="ammo" id="ammo">6 / 6</div>
+  </div></div>
 </div>
 
 <div class="screen" id="menu">
@@ -292,6 +307,8 @@ const CONFIG = {
                  summonCount: 10, blinkDist: 240, blinkTime: 0.6 },
   },
   // Midway boss: one of `kinds` at random, `at` seconds into the run. Killing it drops a heal and an evolution chest.
+  // Overload: screen-clearing charge earned by kills. Destroys everything on screen; bosses take a chunk of max HP instead.
+  overload: { killsPerCharge: 1000, maxCharges: 3, bossDamage: 0.1, cooldown: 1.5 },
   midBoss: {
     enabled: true, at: 300, spawnMul: 0.6, heal: 40,
     kinds: {
@@ -475,6 +492,8 @@ const sfx = {
   heartbeat(){ tone(70, .12, 'sine', .22, .6); tone(62, .14, 'sine', .18, .6, .16); },
   boom(){ noise(.25, .09, 'lowpass', 2500, 0, 150); tone(90, .2, 'sine', .12, .5); },
   buy(){ tone(880, .08, 'square', .03, 1.5); tone(1320, .1, 'square', .03, 1, .08); },
+  ovReady(){ tone(660, .1, 'triangle', .04, 1.5); tone(990, .14, 'triangle', .04, 1.3, .08); },
+  overload(){ noise(.25, .1, 'bandpass', 400, 0, 6000, 2); noise(1.1, .16, 'lowpass', 4000, .1, 60); tone(1600, .5, 'sawtooth', .05, .05, .05); tone(48, 1, 'sine', .3, .5, .08); },
   death(){ noise(1.2, .14, 'lowpass', 3000, 0, 80); tone(220, 1, 'sawtooth', .06, .2); tone(55, .9, 'sine', .2, .6); },
   win(){ [523,659,784,1047,1319].forEach((f,i) => { tone(f, .35, 'triangle', .045, 1, i*.11); tone(f/2, .35, 'sawtooth', .02, 1, i*.11); }); },
 };
@@ -611,7 +630,7 @@ function newGame(){
     player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
     gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
-    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0,
+    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, ovCharges:0, ovKills:0, ovCd:0, wave:null,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
     shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, midBoss:null, midSpawned:false,
@@ -667,6 +686,7 @@ const KEYMAP = { KeyW:'up', ArrowUp:'up', KeyS:'down', ArrowDown:'down', KeyA:'l
 window.addEventListener('keydown', e => {
   if (KEYMAP[e.code]){ keys[KEYMAP[e.code]] = true; e.preventDefault(); }
   if ((e.code === 'Space' || e.code === 'KeyJ') && !e.repeat && S.state === 'play'){ audioInit(); tap(); e.preventDefault(); }
+  if (e.code === 'KeyN' && !e.repeat) activateOverload();
   if (e.code === 'Backquote'){ if (S.state === 'play') pause(); if (S.state === 'paused') activeScreen()?.id === 'debug' ? show('paused') : openDebug(); }
   if (e.code === 'Escape' || e.code === 'KeyP'){ S.state === 'play' ? pause() : S.state === 'paused' && resume(); }
 });
@@ -699,6 +719,7 @@ function pollPad(dt){
     gp.mx = lx; gp.my = ly;
     if (hit(PAD.RT) || hit(PAD.RB) || hit(PAD.LT) || hit(PAD.A)){ audioInit(); tap(); }
     if (hit(PAD.START) || hit(PAD.BACK)) pause();
+    if (hit(PAD.Y)) activateOverload();
   } else {
     gp.mx = gp.my = 0;
     let dir = '';
@@ -851,6 +872,7 @@ function killEnemy(e){
   if (e.elite && !e.boss && !e.noHeal){ dropGem(e.x + 12, e.y, 30, 'heal'); if (SET.shake) S.shake = Math.min(16, S.shake + 6); S.hitstop = .06; }
   for (let i=0;i<e.splits;i++){ const a = i/e.splits*TAU, c = spawnEnemy(e.splitInto, e.x + Math.cos(a)*8, e.y + Math.sin(a)*8); c.kx = Math.cos(a)*160; c.ky = Math.sin(a)*160; c.spawnT = 0; }
   sfx.kill(e);
+  chargeOverload();
   if (e.boss && e.final !== false){ S.hitstop = .25; S.flash = .5; ring(e.x, e.y, 260, '#ffffff', 1); beginEnd(true); }
   else if (e.boss){
     S.hitstop = .15; S.flash = .3; ring(e.x, e.y, 200, '#ffffff', .8);
@@ -891,6 +913,32 @@ function overflowRing(){
       big:false, exec:false, rail:false, trailT:0, hit:new Set(), dead:false });
   }
   ring(P.x, P.y, 60, S.color, .35); sfx.shoot(true);
+}
+function chargeOverload(){
+  const O = CONFIG.overload;
+  if (S.ovCharges >= O.maxCharges){ S.ovKills = O.killsPerCharge; return; }
+  if (++S.ovKills >= O.killsPerCharge){
+    S.ovKills = 0; S.ovCharges++;
+    const P = S.player; S.texts.push({ x:P.x, y:P.y - 28, txt:'OVERLOAD READY', crit:true, life:1.2, dead:false });
+    sfx.ovReady(); buzz(30);
+  }
+}
+function activateOverload(){
+  const O = CONFIG.overload, P = S.player;
+  if (S.state !== 'play' || S.ovCharges <= 0 || S.ovCd > 0) return;
+  S.ovCharges--; S.ovCd = O.cooldown;
+  const hw = W/2/SC, hh = H/2/SC;
+  const onScreen = (x, y, r) => Math.abs(x - P.x) <= hw + r && Math.abs(y - P.y) <= hh + r;
+  for (const e of S.enemies){   // splitter shards spawned mid-loop are on screen too, so they go as well
+    if (e.dead || !onScreen(e.x, e.y, e.r)) continue;
+    if (e.boss){ damageEnemy(e, e.maxHp*O.bossDamage, 0, 0); continue; }
+    killEnemy(e);
+  }
+  for (const s of S.eshots) if (onScreen(s.x, s.y, 0)) s.dead = true;
+  compact(S.enemies);
+  S.wave = { life:.6, max:.6 }; S.flash = .55; S.hitstop = .12;
+  if (SET.shake) S.shake = 16;
+  sfx.overload(); buzz([30,20,80]);
 }
 function openChest(){
   const P = S.player, ready = UPGRADES.filter(evoReady);
@@ -1041,7 +1089,7 @@ function update(dt){
     if (Math.random() < .7) addPart(P.x - Math.cos(P.face)*P.r, P.y - Math.sin(P.face)*P.r, P.face + Math.PI + rand(-.3,.3), rand(20,60), .3, S.color, 2);
   }
   P.invuln = Math.max(0, P.invuln - dt);
-  S.juggCd = Math.max(0, S.juggCd - dt); S.shieldT = Math.max(0, S.shieldT - dt);
+  S.juggCd = Math.max(0, S.juggCd - dt); S.shieldT = Math.max(0, S.shieldT - dt); S.ovCd = Math.max(0, S.ovCd - dt);
   if (P.regen) P.hp = Math.min(P.maxHp, P.hp + P.regen*dt);
 
   // gun + reload
@@ -1191,6 +1239,7 @@ function updateFx(dt){
   for (const t of S.texts){ t.y -= 30*dt; t.life -= dt; if (t.life <= 0) t.dead = true; }
   for (const r of S.rings){ r.life -= dt; if (r.life <= 0) r.dead = true; }
   if (S.banner){ S.banner.life -= dt; if (S.banner.life <= 0) S.banner = null; }
+  if (S.wave){ S.wave.life -= dt; if (S.wave.life <= 0) S.wave = null; }
   S.shake = Math.max(0, S.shake - 40*dt);
   compact(S.parts); compact(S.texts); compact(S.rings);
 }
@@ -1342,6 +1391,11 @@ function render(dt){
     g.addColorStop(0,'rgba(255,40,80,0)'); g.addColorStop(1,`rgba(255,40,80,${.22 + Math.sin(now*6)*.08})`);
     ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
   }
+  if (S.wave){   // overload shockwave rolling out from the ship
+    const k = 1 - S.wave.life/S.wave.max, R = k*Math.hypot(W, H)*.6;
+    ctx.strokeStyle = `rgba(169,139,255,${1-k})`; ctx.lineWidth = 18*(1-k) + 2; ctx.beginPath(); ctx.arc(W/2, H/2, R, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,255,255,${(1-k)*.8})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(W/2, H/2, R*.92, 0, TAU); ctx.stroke();
+  }
   if (S.flash > 0){ ctx.fillStyle = `rgba(255,255,255,${Math.min(.5, S.flash)})`; ctx.fillRect(0,0,W,H); S.flash = Math.max(0, S.flash - dt); }
   // boss health bar
   if (B && !B.dead){
@@ -1411,7 +1465,7 @@ function render(dt){
 }
 
 /* ---------- HUD ---------- */
-const hud = { hpFill:$('hpFill'), hpText:$('hpText'), lv:$('lvText'), xp:$('xpFill'), timer:$('timer'), lbl:$('clockLbl'), kills:$('kills'), ammo:$('ammo') };
+const hud = { ov:$('ovBtn'), ovCount:$('ovCount'), ovFill:$('ovFill'), hpFill:$('hpFill'), hpText:$('hpText'), lv:$('lvText'), xp:$('xpFill'), timer:$('timer'), lbl:$('clockLbl'), kills:$('kills'), ammo:$('ammo') };
 let hudCache = {};
 function setText(el, key, v){ if (hudCache[key] !== v){ hudCache[key] = v; el.textContent = v; } }
 function updateHud(){
@@ -1426,6 +1480,10 @@ function updateHud(){
   setText(hud.kills, 'k', S.kills + ' KILLS');
   setText(hud.ammo, 'am', S.reloading ? 'RELOADING' : `${S.ammo} / ${S.gun.magSize}`);
   hud.ammo.className = 'ammo' + (S.reloading ? ' reload' : S.ammo === 0 ? ' empty' : '');
+  const O = CONFIG.overload;
+  setText(hud.ovCount, 'ov', String(S.ovCharges));
+  hud.ovFill.style.width = (S.ovCharges >= O.maxCharges ? 100 : S.ovKills / O.killsPerCharge * 100) + '%';
+  hud.ov.classList.toggle('ready', S.ovCharges > 0);
 }
 
 /* ---------- screens ---------- */
@@ -1607,6 +1665,8 @@ $('shopBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
 $('optionsBtn').addEventListener('click', () => { buildToggles(); show('options'); });
 $('optionsBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
 $('pauseBtn').addEventListener('click', pause);
+$('ovBtn').addEventListener('pointerdown', e => e.preventDefault());   // don't steal focus (Space would trigger it)
+$('ovBtn').addEventListener('click', e => { e.currentTarget.blur(); activateOverload(); });
 $('resumeBtn').addEventListener('click', resume);
 $('muteBtn').addEventListener('click', () => { SET.sound = !SET.sound; persist(); syncMute(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden){ pause(); saveRun(); } });
@@ -1687,6 +1747,7 @@ const CHEATS = [
     for (const id of evo.needs){ const u = upgradeById(id); while ((S.upgrades[id] || 0) < u.max){ u.apply(); S.upgrades[id] = (S.upgrades[id] || 0) + 1; } }
     S.level++; S.pending++; return `${evo.name} offered when you resume`;
   }],
+  [() => '+1 OVERLOAD', () => { S.ovCharges = Math.min(CONFIG.overload.maxCharges, S.ovCharges + 1); return `${S.ovCharges} Overload charge${S.ovCharges > 1 ? 's' : ''}`; }],
   [() => '+100 SHARDS', () => { SAVE.shards += 100; persist(); return `${SAVE.shards} shards`; }],
 ];
 function buildDebug(){

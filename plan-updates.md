@@ -69,7 +69,8 @@ Maxing two related upgrades unlocks a powered-up version on the next level-up.
 - Flashes when a shrink is coming
 - Option to hide it in Options
 
-## 6. Nuke (screen-clear bomb)
+## 6. Overload (screen-clear bomb) ✅ done
+(Named Overload. HUD button above the ammo readout, controller Y, keyboard N. Debug cheat: +1 OVERLOAD. Shop perk still a later idea.)
 - Earn 1 nuke charge per 1,000 kills (`CONFIG.nuke.killsPerCharge`), carried across the run, with a cap (e.g. 3)
 - Activating it destroys every enemy currently on screen; enemies off screen are not affected
 - Bosses take heavy damage instead of dying (e.g. 10% of max HP); elites die

@@ -20,7 +20,7 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Every tunable number lives in `CONFIG` at the top of the script. Add new numbers there, not inline.
 
 ## Script map (in order)
-- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, evolutions, spawn, difficulty, elite, boss, xp, enemies, controls, audio
+- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, evolutions, overload, spawn, difficulty, elite, boss, xp, enemies, controls, audio
 - `UPGRADES` — in-run level-up choices (`id`, `name`, `desc`, `max`, `apply()` mutates `S`)
 - Evolutions: `UPGRADES` entries with `evo:true, needs:[a,b]`; offered (up to 2, shown first, gold card) once both parents are maxed (`evoReady`). Flags live in `S.evo` (chain, rail, exec, overflow, blade, jugg); numbers in `CONFIG.evolutions`. Helpers: `explode()`, `overflowRing()`, `orbRadius()`, rail `S.trails`. Level-up cards show an "Evolves into…" hint via `evoHint()`.
 - Canvas setup: `resize()` sets `W`, `H`, `DPR`, `SC` (world→screen scale = H / view.height)
@@ -36,6 +36,7 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Spawning: `spawnEnemy(type,x,y,elite)`, `eshot(x,y,a,speed,dmg,life,r)` (enemy bullets; speed 0 = lingering mine)
 - Bosses: `makeBoss(kind,def,final)`; final boss `spawnBoss()` uses `S.finalKind` (random from `CONFIG.finalBosses.pick`: overseer | conductor) and sets `S.boss`; midway boss `spawnMidBoss(kind)` at `CONFIG.midBoss.at` (prime | hive | lancer) sets `S.midBoss`. `bossDef(e)` returns a boss's config; AI in `BOSS_AI[kind]` via `updateBoss()`. Killing a final boss (`e.final`) wins; a midway boss drops a chest (`openChest()`: random ready evolution, else a free level-up), a heal and XP. Bosses use `windup` (charge line) and `blinkT/bx/by` (teleport marker) for telegraphs.
 - Combat: `damageEnemy()`, `killEnemy()`, `hurt()`, `addXp()`, `pulseNova()`, `levelBlast()`
+- Overload (screen-clear): `CONFIG.overload`; every kill calls `chargeOverload()` (`S.ovKills` → `S.ovCharges`, capped); `activateOverload()` kills every enemy inside the visible area, clears on-screen enemy shots, and deals `bossDamage` × max HP to bosses. Triggers: HUD `#ovBtn`, controller Y during play, N key. Shockwave drawn from `S.wave`.
 - `update(dt)` — gameplay; `updateFx(dt)` — particles/texts/rings/shake (also runs during `ending` slow-mo)
 - `render(dt)` — world pass (grid, gems, enemies, bullets, player, ammo arc) then screen pass (vignette, boss bar, banner, joystick, crosshair, hints, FPS)
 - HUD: DOM elements updated in `updateHud()` with `setText()` caching
