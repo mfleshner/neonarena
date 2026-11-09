@@ -62,3 +62,4 @@ Matt tests on his phone after each push. Keep replies short and say what changed
 
 ## Commits
 Commit as Matt (`git -c user.name="mfleshner" -c user.email="mattfleshner@gmail.com"`), short imperative messages, and push to `main`.
+Bump `BUILD` (top of the script) by 1 in every push that changes `index.html`. It shows on the menu and pause screen so Matt can tell whether his phone has the latest version.

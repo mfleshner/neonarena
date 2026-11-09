@@ -163,6 +163,7 @@ body.portrait #rotate{display:grid}
     <div class="row"><button class="primary" id="continueBtn" type="button" hidden>CONTINUE</button><button class="primary" id="startBtn" type="button">START</button></div>
     <div class="small" id="continueInfo" hidden></div>
     <div class="row"><button class="ghost" id="shipsBtn" type="button">SHIP: STRIKER</button><button class="ghost" id="shopBtn" type="button">UPGRADES</button><button class="ghost" id="optionsBtn" type="button">OPTIONS</button></div>
+    <div class="small" id="buildText"></div>
     <div class="small" id="bestText">Survive 10:00, then destroy the Overseer</div>
   </div>
 </div>
@@ -209,6 +210,7 @@ body.portrait #rotate{display:grid}
     <h2 id="pausedTitle">PAUSED</h2>
     <div class="row"><button class="primary" id="resumeBtn" type="button">RESUME</button><button class="ghost" id="restartBtn" type="button">RESTART</button><button class="ghost" id="menuBtn" type="button">MENU</button></div>
     <div class="row" id="toggles"></div>
+    <div class="small" id="pauseBuild"></div>
   </div>
 </div>
 
@@ -243,6 +245,8 @@ body.portrait #rotate{display:grid}
 /* =====================================================================
    NEON ARENA — tweak everything here
    ===================================================================== */
+const BUILD = 21;   // bump by 1 on every push that changes this file, so the menu shows which version is running
+
 const CONFIG = {
   runSeconds: 600,              // survive this long, then the boss arrives
   view: { height: 460, gridSize: 48 },   // world units visible top-to-bottom
@@ -1673,6 +1677,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden){ paus
 window.addEventListener('pagehide', saveRun);
 $('continueBtn').addEventListener('click', continueRun);
 refreshMenu(); syncMute();
+$('buildText').textContent = $('pauseBuild').textContent = 'BUILD ' + BUILD;
 
 /* ---------- debug panel ----------
    Open from the pause screen: tap the PAUSED title 5 times, press ` on a keyboard, or Y on a controller.
