@@ -2,7 +2,8 @@
 
 Every new number goes in `CONFIG` so it can be tuned later (and from the debug panel once it exists).
 
-## 1. Debug panel
+## 1. Debug panel ✅ done
+(Entry ended up as: tap PAUSED 5 times, ` key, or controller Y on the pause screen. Midway-boss cheat comes with item 4.)
 Tune the game on the phone without editing code.
 
 - Hidden entry: tap the timer 5 times on the pause screen (or press the backtick key on PC)

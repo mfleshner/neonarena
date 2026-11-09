@@ -40,6 +40,7 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Screens: `SCREENS` list + `show(id)`; builders `buildShips()`, `buildShop()`, `buildToggles()` (fills both `#toggles` on pause and `#optToggles` in Options), `buildCards()` for level-ups
 - Run flow: `start()`, `pause()`, `resume()`, `openLevelUp()`, `beginEnd(won)`, `finishRun()` (awards shards, best, wins)
 - Run save: `saveRun()` / `loadRun()` / `clearRun()` / `continueRun()` (localStorage `neonArena.run`, `v:1`; drops bullets/effects; boss restored via `bossIdx`). Saved on pause, tab hidden, menu, and every 10s. Cleared on new run and on death/win. If `S` gains fields, they save automatically; bump `v` only for breaking changes.
+- Debug panel: `DEBUG_ROWS` (tunable paths into `CONFIG`, with `live` hooks into `S`), `CHEATS`, `buildDebug()`, `openDebug()`; tweaks persist in localStorage `neonArena.debug` and are applied over `CONFIG` at load (`DEFAULT_CONFIG` keeps the originals). Cheats set `S.cheated`, which blocks records. Open: tap PAUSED 5×, ` key, or controller Y on pause.
 - `frame()` — main loop: `pollPad`, hitstop, update or ending slow-mo, render, HUD
 
 ## Gotchas

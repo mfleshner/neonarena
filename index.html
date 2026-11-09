@@ -56,6 +56,17 @@ body{font-family:var(--ui);-webkit-user-select:none;user-select:none;-webkit-tou
 .btns{display:flex;gap:8px;justify-content:flex-end}
 .btns button{pointer-events:auto;font-family:var(--ui);font-weight:700;font-size:11px;letter-spacing:.12em;color:var(--text);background:rgba(7,6,15,.6);border:1px solid var(--line);border-radius:4px;padding:8px 11px;cursor:pointer}
 button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+#debug{place-items:start center}
+.dbg{width:100%;max-width:920px;gap:10px}
+.dbghead{display:flex;align-items:baseline;gap:14px}
+.dbgrows{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 16px;width:100%}
+.dbgrow{display:grid;grid-template-columns:1fr 36px 64px 36px;align-items:center;gap:6px;font-size:12px;letter-spacing:.05em;text-align:left;min-width:0}
+.dbgrow .dl{color:var(--dim);min-width:0}
+.dbgrow.changed .dl{color:var(--amber)}
+.dbgrow b{text-align:center;font-variant-numeric:tabular-nums}
+.dbgrow button{padding:6px 0;font-size:15px;letter-spacing:0}
+.dbg .row .ghost{padding:8px 12px;font-size:11px}
+#dbgOut{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;font:12px/1.5 var(--ui);padding:8px;resize:none;-webkit-user-select:text;user-select:text}
 body.pad .screen button:focus{outline:2px solid var(--cyan);outline-offset:3px;box-shadow:0 0 16px rgba(63,243,255,.4)}
 .bottom{display:flex;justify-content:flex-end}
 .ammo{font-weight:700;font-size:13px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 8px rgba(63,243,255,.6);font-variant-numeric:tabular-nums;min-width:120px;text-align:right}
@@ -176,9 +187,20 @@ body.portrait #rotate{display:grid}
 
 <div class="screen" id="paused" hidden>
   <div class="box">
-    <h2>PAUSED</h2>
+    <h2 id="pausedTitle">PAUSED</h2>
     <div class="row"><button class="primary" id="resumeBtn" type="button">RESUME</button><button class="ghost" id="restartBtn" type="button">RESTART</button><button class="ghost" id="menuBtn" type="button">MENU</button></div>
     <div class="row" id="toggles"></div>
+  </div>
+</div>
+
+<div class="screen" id="debug" hidden>
+  <div class="box dbg">
+    <div class="dbghead"><h2>DEBUG</h2><span class="small" id="dbgCount"></span></div>
+    <div class="dbgrows" id="dbgRows"></div>
+    <div class="row" id="dbgCheats"></div>
+    <div class="row"><button class="ghost" id="dbgCopy" type="button">COPY CONFIG</button><button class="ghost" id="dbgReset" type="button">RESET TO DEFAULTS</button><button class="primary" id="dbgBack" type="button">BACK</button></div>
+    <div class="small" id="dbgNote" aria-live="polite"></div>
+    <textarea id="dbgOut" readonly hidden rows="4" aria-label="Changed config values"></textarea>
   </div>
 </div>
 
@@ -471,6 +493,7 @@ const KEYMAP = { KeyW:'up', ArrowUp:'up', KeyS:'down', ArrowDown:'down', KeyA:'l
 window.addEventListener('keydown', e => {
   if (KEYMAP[e.code]){ keys[KEYMAP[e.code]] = true; e.preventDefault(); }
   if ((e.code === 'Space' || e.code === 'KeyJ') && !e.repeat && S.state === 'play'){ audioInit(); tap(); e.preventDefault(); }
+  if (e.code === 'Backquote'){ if (S.state === 'play') pause(); if (S.state === 'paused') activeScreen()?.id === 'debug' ? show('paused') : openDebug(); }
   if (e.code === 'Escape' || e.code === 'KeyP'){ S.state === 'play' ? pause() : S.state === 'paused' && resume(); }
 });
 window.addEventListener('keyup', e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
@@ -516,6 +539,7 @@ function pollPad(dt){
       if (el && visibleButtons().includes(el)) el.click(); else navMove('down');
     }
     if (hit(PAD.B)) navBack();
+    if (hit(PAD.Y) && activeScreen()?.id === 'paused') openDebug();
     if (hit(PAD.START)){ if (S.state === 'paused') resume(); else if (S.state !== 'levelup') visibleButtons()[0]?.click(); }
   }
   gp.prev = p.buttons.map((_, i) => down(i));
@@ -530,7 +554,7 @@ function navMove(dir){
 }
 function navBack(){
   const s = activeScreen(); if (!s) return;
-  const back = { ships:'shipsBack', shop:'shopBack', options:'optionsBack' }[s.id];
+  const back = { ships:'shipsBack', shop:'shopBack', options:'optionsBack', debug:'dbgBack' }[s.id];
   if (back) $(back).click(); else if (s.id === 'paused') resume();
 }
 function keepFocus(fn){   // rebuild a button list without losing the controller's place
@@ -639,7 +663,7 @@ function dropGem(x,y,v,kind){
   S.gems.push({ x, y, v, kind, mag:false, dead:false, bob:rand(0,6) });
 }
 function hurt(dmg){
-  const P = S.player; if (P.invuln > 0 || S.state !== 'play') return;
+  const P = S.player; if (P.invuln > 0 || S.state !== 'play' || S.god) return;
   P.hp -= dmg; P.invuln = CONFIG.player.invulnTime;
   if (SET.shake) S.shake = Math.min(16, S.shake + 9);
   S.hitstop = Math.max(S.hitstop, .04);
@@ -1018,10 +1042,14 @@ function render(dt){
     ctx.setLineDash([4,6]); ctx.strokeStyle = 'rgba(63,243,255,.4)'; ctx.beginPath(); ctx.moveTo(W*CONFIG.controls.joystickZone, H*.25); ctx.lineTo(W*CONFIG.controls.joystickZone, H*.9); ctx.stroke(); ctx.setLineDash([]);
     ctx.globalAlpha = 1;
   }
-  // fps
-  if (SET.fps && S.state !== 'menu'){
+  // fps + debug indicator
+  if ((SET.fps || dbgCount || S.god) && S.state !== 'menu'){
     ctx.font = '700 10px "Chakra Petch", ui-monospace, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = COL.amber;
-    ctx.fillText(`${Math.round(fpsSmooth)} FPS · ${S.enemies.length} ENEMIES · ${S.bullets.length + S.eshots.length} SHOTS`, 14, H - 14);
+    const parts = [];
+    if (SET.fps) parts.push(`${Math.round(fpsSmooth)} FPS · ${S.enemies.length} ENEMIES · ${S.bullets.length + S.eshots.length} SHOTS`);
+    if (dbgCount) parts.push(`${dbgCount} TWEAKED`);
+    if (S.god) parts.push('GOD MODE');
+    ctx.fillText(parts.join(' · '), 14, H - 14);
   }
 }
 
@@ -1044,7 +1072,7 @@ function updateHud(){
 }
 
 /* ---------- screens ---------- */
-const SCREENS = ['menu','ships','shop','options','levelup','paused','over'];
+const SCREENS = ['menu','ships','shop','options','levelup','paused','debug','over'];
 function show(id){
   SCREENS.forEach(s => $(s).hidden = s !== id);
   $('hud').hidden = ['menu','ships','shop','options','over'].includes(id);
@@ -1181,13 +1209,13 @@ function finishRun(){
   let gain = Math.floor(S.kills/CONFIG.shards.perKills) + Math.floor(survived/CONFIG.shards.perSeconds) + (won ? CONFIG.shards.win : 0);
   gain = Math.round(gain*(1 + .15*(SAVE.perks.greed || 0)));
   SAVE.shards += gain;
-  const prev = SAVE.best, newBest = survived > prev.time + .5 || (won && S.kills > prev.kills && survived >= prev.time - .5);
+  const prev = SAVE.best, newBest = !S.cheated && (survived > prev.time + .5 || (won && S.kills > prev.kills && survived >= prev.time - .5));
   if (newBest) SAVE.best = { time:survived, kills:S.kills };
-  if (won) SAVE.wins++;
+  if (won && !S.cheated) SAVE.wins++;
   persist();
   $('overTitle').textContent = won ? 'ARENA CLEARED' : 'SIGNAL LOST';
   $('oTime').textContent = fmt(survived); $('oKills').textContent = S.kills; $('oLevel').textContent = S.level; $('oShards').textContent = '+' + gain;
-  $('oBest').textContent = newBest ? 'New best run' : `Best: ${fmt(prev.time)} survived`;
+  $('oBest').textContent = S.cheated ? 'Debug cheats used: run not counted for records' : newBest ? 'New best run' : `Best: ${fmt(prev.time)} survived`;
   show('over');
 }
 
@@ -1209,6 +1237,110 @@ document.addEventListener('visibilitychange', () => { if (document.hidden){ paus
 window.addEventListener('pagehide', saveRun);
 $('continueBtn').addEventListener('click', continueRun);
 refreshMenu(); syncMute();
+
+/* ---------- debug panel ----------
+   Open from the pause screen: tap the PAUSED title 5 times, press ` on a keyboard, or Y on a controller.
+   Tweaks change CONFIG (and the current run where it makes sense), persist in localStorage, and can be copied out. */
+const DEFAULT_CONFIG = JSON.parse(JSON.stringify(CONFIG));
+const DEBUG_ROWS = [
+  { label:'Tap cooldown',     path:'gun.tapCooldown',          step:.01, min:.02, live:'gun' },
+  { label:'Reload delay',     path:'gun.reloadDelay',          step:.05, min:0,   live:'gun' },
+  { label:'Reload time',      path:'gun.reloadTime',           step:.05, min:.1,  live:'gun' },
+  { label:'Damage',           path:'gun.damage',               step:1,   min:1,   live:'gun' },
+  { label:'Mag size',         path:'gun.magSize',              step:1,   min:1,   live:'gun' },
+  { label:'Move speed',       path:'player.speed',             step:5,   min:40,  live:'player' },
+  { label:'Spawns / sec',     path:'spawn.base',               step:.1,  min:0 },
+  { label:'Spawns + / min',   path:'spawn.perMinute',          step:.1,  min:0 },
+  { label:'Max enemies',      path:'spawn.max',                step:20,  min:20 },
+  { label:'Enemy HP + / min', path:'difficulty.hpPerMinute',   step:.05, min:0 },
+  { label:'Enemy speed + / min', path:'difficulty.speedPerMinute', step:.01, min:0 },
+  { label:'XP curve',         path:'xp.growth',                step:.02, min:1 },
+  { label:'Run length (s)',   path:'runSeconds',               step:30,  min:30,  live:'run' },
+  { label:'Boss HP',          path:'boss.hp',                  step:500, min:500, live:'boss' },
+];
+const getPath = (o, p) => p.split('.').reduce((a, k) => a[k], o);
+function setPath(o, p, v){ const ks = p.split('.'), last = ks.pop(); ks.reduce((a, k) => a[k], o)[last] = v; }
+const roundTo = (v, step) => +v.toFixed((String(step).split('.')[1] || '').length);
+let DEBUG = {};
+try { DEBUG = JSON.parse(localStorage.getItem('neonArena.debug')) || {}; } catch {}
+for (const [p, v] of Object.entries(DEBUG)){ try { setPath(CONFIG, p, v); } catch { delete DEBUG[p]; } }
+let dbgCount = Object.keys(DEBUG).length;
+if (dbgCount) newGame();   // rebuild the menu backdrop with the saved tweaks
+function saveDebug(){
+  dbgCount = Object.keys(DEBUG).length;
+  try { dbgCount ? localStorage.setItem('neonArena.debug', JSON.stringify(DEBUG)) : localStorage.removeItem('neonArena.debug'); } catch {}
+}
+function applyLive(row, delta, val){
+  if (row.live === 'gun'){
+    const k = row.path.split('.')[1];
+    S.gun[k] = Math.max(row.min, roundTo(S.gun[k] + delta, row.step));
+    if (k === 'magSize') S.ammo = Math.min(S.ammo, S.gun.magSize);
+  } else if (row.live === 'player') S.player.speed = Math.max(row.min, S.player.speed + delta);
+  else if (row.live === 'run'){ if (!S.bossPhase) S.timeLeft = Math.max(1, S.timeLeft + delta); }
+  else if (row.live === 'boss' && S.boss && !S.boss.dead){ const r = S.boss.hp / S.boss.maxHp; S.boss.maxHp = val; S.boss.hp = val*r; }
+}
+function adjust(row, dir){
+  const old = getPath(CONFIG, row.path), val = Math.max(row.min, roundTo(old + dir*row.step, row.step));
+  if (val === old) return;
+  setPath(CONFIG, row.path, val); applyLive(row, val - old, val);
+  if (val === getPath(DEFAULT_CONFIG, row.path)) delete DEBUG[row.path]; else DEBUG[row.path] = val;
+  saveDebug(); keepFocus(buildDebug);
+}
+function dbgNote(t){ $('dbgNote').textContent = t; }
+const CHEATS = [
+  [() => '+1 LEVEL',    () => { S.level++; S.pending++; S.xp = 0; S.xpNext = Math.round(S.xpNext*CONFIG.xp.growth + CONFIG.xp.add); return 'Level-up waiting when you resume'; }],
+  [() => 'SPAWN ELITE', () => { spawnEnemy(S.t >= CONFIG.enemies.hexer.from ? 'hexer' : 'drone', undefined, undefined, true); return 'Elite spawned'; }],
+  [() => 'SPAWN BOSS',  () => { if (S.bossPhase) return 'Boss already here'; S.timeLeft = .01; return 'Boss arrives when you resume'; }],
+  [() => 'SKIP 1 MIN',  () => { if (S.bossPhase) return 'Timer already done'; S.timeLeft = Math.max(.01, S.timeLeft - 60); S.t += 60; return 'Skipped ahead 1 minute'; }],
+  [() => 'FULL HP',     () => { S.player.hp = S.player.maxHp; return 'HP refilled'; }],
+  [() => 'KILL ALL',    () => { let n = 0; for (const e of S.enemies) if (!e.boss && !e.dead){ killEnemy(e); n++; } compact(S.enemies); return `Killed ${n} enemies`; }],
+  [() => S.god ? 'GOD MODE: ON' : 'GOD MODE: OFF', () => { S.god = !S.god; return S.god ? 'You can\'t take damage' : 'Damage is back on'; }],
+  [() => '+100 SHARDS', () => { SAVE.shards += 100; persist(); return `${SAVE.shards} shards`; }],
+];
+function buildDebug(){
+  const rows = $('dbgRows'); rows.innerHTML = '';
+  for (const row of DEBUG_ROWS){
+    const d = document.createElement('div'); d.className = 'dbgrow' + (row.path in DEBUG ? ' changed' : '');
+    const lab = document.createElement('span'); lab.className = 'dl'; lab.textContent = row.label;
+    const val = document.createElement('b'); val.textContent = getPath(CONFIG, row.path);
+    const mk = (txt, dir) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = txt;
+      b.setAttribute('aria-label', (dir < 0 ? 'Lower ' : 'Raise ') + row.label); b.addEventListener('click', () => adjust(row, dir)); return b; };
+    d.append(lab, mk('−', -1), val, mk('+', 1));
+    rows.appendChild(d);
+  }
+  const ch = $('dbgCheats'); ch.innerHTML = '';
+  for (const [label, fn] of CHEATS){
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = label();
+    b.addEventListener('click', () => { S.cheated = true; dbgNote(fn()); keepFocus(buildDebug); });
+    ch.appendChild(b);
+  }
+  $('dbgCount').textContent = dbgCount ? `${dbgCount} value${dbgCount > 1 ? 's' : ''} changed` : 'All values at defaults';
+}
+function debugText(){
+  const e = Object.entries(DEBUG);
+  if (!e.length) return 'No changes from the defaults.';
+  return e.map(([p, v]) => `CONFIG.${p}: ${v}   // default ${getPath(DEFAULT_CONFIG, p)}`).join('\n');
+}
+function openDebug(){ if (S.state !== 'paused') return; dbgNote(''); $('dbgOut').hidden = true; buildDebug(); show('debug'); }
+let titleTaps = 0, titleTapT = 0;
+$('pausedTitle').addEventListener('click', () => {
+  const now = performance.now(); titleTaps = now - titleTapT < 600 ? titleTaps + 1 : 1; titleTapT = now;
+  if (titleTaps >= 5){ titleTaps = 0; openDebug(); }
+});
+$('dbgBack').addEventListener('click', () => { buildToggles(); show('paused'); });
+$('dbgReset').addEventListener('click', () => {
+  for (const p of Object.keys(DEBUG)){
+    const row = DEBUG_ROWS.find(r => r.path === p), def = getPath(DEFAULT_CONFIG, p), old = getPath(CONFIG, p);
+    setPath(CONFIG, p, def); if (row) applyLive(row, def - old, def);
+  }
+  DEBUG = {}; saveDebug(); dbgNote('Back to defaults'); keepFocus(buildDebug);
+});
+$('dbgCopy').addEventListener('click', () => {
+  const t = debugText(), out = $('dbgOut');
+  out.value = t; out.hidden = false;
+  const fallback = () => { out.focus(); out.select(); dbgNote('Select and copy the text below'); };
+  try { navigator.clipboard.writeText(t).then(() => dbgNote('Copied. Paste it to Claude or into CONFIG.'), fallback); } catch { fallback(); }
+});
 
 /* ---------- loop ---------- */
 const portraitMQ = matchMedia('(orientation: portrait) and (pointer: coarse)');
