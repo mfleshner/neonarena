@@ -25,7 +25,8 @@ Replace the placeholder beeps.
 - Last Round shot and crits get their own punchier sound
 - Limit how many of the same sound can play at once so big fights don't get noisy
 
-## 3. Evolutions
+## 3. Evolutions ✅ done
+(Debug panel has a READY EVOLUTION cheat that maxes a random pair so you can test them.)
 Maxing two related upgrades unlocks a powered-up version on the next level-up.
 
 | Evolution | Requires | Effect |

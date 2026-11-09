@@ -111,6 +111,10 @@ h2{font-family:var(--display);font-weight:400;margin:0;font-size:clamp(24px,6vh,
 .card .pips{display:flex;gap:3px;margin-top:2px}
 .card .pips i{width:10px;height:4px;background:var(--line);border-radius:1px}
 .card .pips i.on{background:var(--cyan);box-shadow:0 0 5px var(--cyan)}
+.card .hint{font-size:10px;letter-spacing:.04em;color:var(--violet);line-height:1.3}
+.card.evo{border-color:var(--amber);box-shadow:0 0 18px rgba(255,194,61,.35);background:linear-gradient(160deg,rgba(255,194,61,.12),var(--panel) 55%)}
+.card.evo .tag{color:var(--ink);background:var(--amber);padding:2px 6px;border-radius:2px}
+.card.evo .hint{color:var(--amber)}
 .cards.ships .card{width:min(180px,21vw)}
 .cards.shop .card{width:min(210px,27vw)}
 
@@ -266,6 +270,14 @@ const CONFIG = {
 
   orbital: { radius: 62, spin: 3.2, damage: 9, hitEvery: 0.35 },
   nova: { every: 5, radius: 110, damage: 25 },
+  // Evolutions: unlocked by maxing both parent upgrades (see the evo entries at the end of UPGRADES)
+  evolutions: {
+    rail:     { trailDamage: 0.3, trailEvery: 0.03, trailLife: 0.45, damageMul: 1.5 },
+    exec:     { radius: 70, splash: 0.6 },
+    overflow: { count: 12 },
+    blade:    { radius: 20, spinMul: 1.5, damageMul: 2, novaRadius: 55, novaEvery: 0.6 },
+    jugg:     { hp: 100, shieldTime: 2, cooldown: 20 },
+  },
 
   spawn: { base: 1.0, perMinute: 0.9, max: 320, burstEvery: 45, burstCount: 18, eliteEvery: 60 },
   difficulty: { hpPerMinute: 0.25, speedPerMinute: 0.03 },
@@ -309,7 +321,19 @@ const UPGRADES = [
   { id:'magnet', name:'Tractor Field',desc:'+40% pickup radius',                          max:3, apply(){ S.player.pickup *= 1.4; } },
   { id:'regen',  name:'Nanites',     desc:'Regenerate 1 HP per second',                   max:3, apply(){ S.player.regen += 1; } },
   { id:'orb',    name:'Orbitals',    desc:'+1 blade orbiting you. Blades block enemy shots', max:4, apply(){ S.orbitals += 1; } },
+  // Evolutions: offered once both upgrades in `needs` are maxed
+  { id:'evo_chain',    evo:true, needs:['multi','bounce'], name:'Chain Shot',  desc:'Every bounce splits into 2 shots', max:1, apply(){ S.evo.chain = true; } },
+  { id:'evo_rail',     evo:true, needs:['pierce','vel'],   name:'Railstorm',   desc:'Shots pierce everything, hit 50% harder and leave a burning trail', max:1, apply(){ S.evo.rail = true; } },
+  { id:'evo_exec',     evo:true, needs:['last','crit'],    name:'Executioner', desc:'The last round always crits and explodes on impact', max:1, apply(){ S.evo.exec = true; } },
+  { id:'evo_overflow', evo:true, needs:['mag','fresh'],    name:'Overflow',    desc:'Every finished reload fires a ring of shots', max:1, apply(){ S.evo.overflow = true; } },
+  { id:'evo_blade',    evo:true, needs:['orb','nova'],     name:'Blade Storm', desc:'Bigger, faster blades that hit twice as hard and burst on contact', max:1, apply(){ S.evo.blade = true; } },
+  { id:'evo_jugg',     evo:true, needs:['hp','regen'],     name:'Juggernaut',  desc:'+100 max HP, full heal, and a 2s shield when hit below 30% HP', max:1,
+    apply(){ S.evo.jugg = true; S.player.maxHp += CONFIG.evolutions.jugg.hp; S.player.hp = S.player.maxHp; } },
 ];
+const upgradeById = id => UPGRADES.find(u => u.id === id);
+const isMaxed = id => (S.upgrades[id] || 0) >= upgradeById(id).max;
+const evoReady = u => u.evo && !S.upgrades[u.id] && u.needs.every(isMaxed);
+const orbRadius = () => CONFIG.orbital.radius + (S.evo.blade ? CONFIG.evolutions.blade.radius : 0);
 
 /* ===================================================================== */
 const COL = { ink:'#07060f', grid:'#16123a', gridMajor:'#251e5c', cyan:'#3ff3ff', pink:'#ff3d9a', amber:'#ffc23d', violet:'#a98bff', danger:'#ff4d5e', heal:'#7dffb2', eshot:'#ff5d73' };
@@ -430,6 +454,7 @@ const sfx = {
   boss(){ sfx.siren(); [110,98,82].forEach((f,i) => tone(f, .6, 'sawtooth', .06, .8, 1.7 + i*.35)); noise(1.4, .08, 'lowpass', 200, 1.7, 2500); },
   charge(){ tone(90, .5, 'sawtooth', .05, 2.5); noise(.5, .05, 'bandpass', 200, 0, 2000, 3); },
   heartbeat(){ tone(70, .12, 'sine', .22, .6); tone(62, .14, 'sine', .18, .6, .16); },
+  boom(){ noise(.25, .09, 'lowpass', 2500, 0, 150); tone(90, .2, 'sine', .12, .5); },
   buy(){ tone(880, .08, 'square', .03, 1.5); tone(1320, .1, 'square', .03, 1, .08); },
   death(){ noise(1.2, .14, 'lowpass', 3000, 0, 80); tone(220, 1, 'sawtooth', .06, .2); tone(55, .9, 'sine', .2, .6); },
   win(){ [523,659,784,1047,1319].forEach((f,i) => { tone(f, .35, 'triangle', .045, 1, i*.11); tone(f/2, .35, 'sawtooth', .02, 1, i*.11); }); },
@@ -567,7 +592,7 @@ function newGame(){
     player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
     gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
-    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{},
+    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
     shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, endT:0, endWon:false,
@@ -730,7 +755,8 @@ function fire(){
   for (let i=0;i<n;i++){
     const ang = a + (i - (n-1)/2) * G.spread;
     S.bullets.push({ x:P.x + Math.cos(ang)*P.r, y:P.y + Math.sin(ang)*P.r, vx:Math.cos(ang)*G.bulletSpeed, vy:Math.sin(ang)*G.bulletSpeed,
-      life, dmg:G.damage*S.dmgMul*mul, pierce:G.pierce, bounce:G.bounce, big:last, hit:new Set(), dead:false });
+      life, dmg:G.damage*S.dmgMul*mul*(S.evo.rail ? CONFIG.evolutions.rail.damageMul : 1), pierce:S.evo.rail ? 999 : G.pierce, bounce:G.bounce,
+      big:last, exec:last && S.evo.exec, rail:!!S.evo.rail, trailT:0, hit:new Set(), dead:false });
   }
   for (let i=0;i<(last ? 14 : 5);i++) addPart(P.x + Math.cos(a)*P.r, P.y + Math.sin(a)*P.r, a + rand(-.5,.5), rand(80,last ? 320 : 220), .18, last ? COL.amber : S.color, 2);
   if (last && SET.shake) S.shake = Math.min(16, S.shake + 4);
@@ -796,6 +822,10 @@ function dropGem(x,y,v,kind){
 function hurt(dmg){
   const P = S.player; if (P.invuln > 0 || S.state !== 'play' || S.god) return;
   P.hp -= dmg; P.invuln = CONFIG.player.invulnTime;
+  const J = CONFIG.evolutions.jugg;
+  if (S.evo.jugg && P.hp > 0 && P.hp/P.maxHp < .3 && S.juggCd <= 0){
+    P.invuln = S.shieldT = J.shieldTime; S.juggCd = J.cooldown; ring(P.x, P.y, 90, COL.cyan, .6); sfx.nova();
+  }
   if (SET.shake) S.shake = Math.min(16, S.shake + 9);
   S.hitstop = Math.max(S.hitstop, .04);
   burst(P.x, P.y, COL.pink, 14, 240); sfx.hurt(); buzz(40);
@@ -804,6 +834,19 @@ function hurt(dmg){
 function addXp(v){
   S.xp += v;
   while (S.xp >= S.xpNext){ S.xp -= S.xpNext; S.level++; S.pending++; S.xpNext = Math.round(S.xpNext*CONFIG.xp.growth + CONFIG.xp.add); }
+}
+function explode(x, y, R, dmg, color, skip){
+  gridQuery(x, y, R + 50, e => { if (e === skip) return; const dx = e.x-x, dy = e.y-y, d = Math.hypot(dx,dy) || 1; if (d < R + e.r) damageEnemy(e, dmg, dx/d, dy/d); });
+  ring(x, y, R, color, .35); burst(x, y, color, 10, 220); if (allow('boom', 2, 90)) sfx.boom();
+}
+function overflowRing(){
+  const P = S.player, G = S.gun, n = CONFIG.evolutions.overflow.count, life = G.range*1.35 / G.bulletSpeed;
+  for (let i=0;i<n;i++){
+    const a = i/n*TAU;
+    S.bullets.push({ x:P.x, y:P.y, vx:Math.cos(a)*G.bulletSpeed, vy:Math.sin(a)*G.bulletSpeed, life, dmg:G.damage*S.dmgMul, pierce:G.pierce, bounce:0,
+      big:false, exec:false, rail:false, trailT:0, hit:new Set(), dead:false });
+  }
+  ring(P.x, P.y, 60, S.color, .35); sfx.shoot(true);
 }
 function pulseNova(){
   const P = S.player, R = CONFIG.nova.radius + 15*(S.nova-1), dmg = CONFIG.nova.damage*S.dmgMul*(1 + .25*(S.nova-1));
@@ -863,13 +906,14 @@ function update(dt){
     if (Math.random() < .7) addPart(P.x - Math.cos(P.face)*P.r, P.y - Math.sin(P.face)*P.r, P.face + Math.PI + rand(-.3,.3), rand(20,60), .3, S.color, 2);
   }
   P.invuln = Math.max(0, P.invuln - dt);
+  S.juggCd = Math.max(0, S.juggCd - dt); S.shieldT = Math.max(0, S.shieldT - dt);
   if (P.regen) P.hp = Math.min(P.maxHp, P.hp + P.regen*dt);
 
   // gun + reload
   S.cooldown -= dt; S.idle += dt;
   if (S.reloading){
     S.reloadT -= dt;
-    if (S.reloadT <= 0){ S.reloading = false; S.ammo = G.magSize; S.freshReady = true; sfx.reload(); }
+    if (S.reloadT <= 0){ S.reloading = false; S.ammo = G.magSize; S.freshReady = true; sfx.reload(); if (S.evo.overflow) overflowRing(); }
   } else if (S.ammo < G.magSize && (S.ammo === 0 ? S.cooldown <= 0 : S.idle >= G.reloadDelay)){
     S.reloading = true; S.reloadT = G.reloadTime; S.queued = false; sfx.reloadStart();
   }
@@ -923,13 +967,19 @@ function update(dt){
 
   // orbitals
   if (S.orbitals){
-    S.orbAngle += CONFIG.orbital.spin*dt;
+    const BL = CONFIG.evolutions.blade, blade = S.evo.blade, oR = orbRadius();
+    const oDmg = CONFIG.orbital.damage*S.dmgMul*(blade ? BL.damageMul : 1);
+    S.orbAngle += CONFIG.orbital.spin*(blade ? BL.spinMul : 1)*dt;
     for (let i=0;i<S.orbitals;i++){
-      const a = S.orbAngle + i/S.orbitals*TAU, ox = P.x + Math.cos(a)*CONFIG.orbital.radius, oy = P.y + Math.sin(a)*CONFIG.orbital.radius;
+      const a = S.orbAngle + i/S.orbitals*TAU, ox = P.x + Math.cos(a)*oR, oy = P.y + Math.sin(a)*oR;
+      S.bladeCd[i] = (S.bladeCd[i] || 0) - dt;
       gridQuery(ox, oy, 60, e => {
         if (e.dead || e.orbCd > 0) return;
-        const dx = e.x - ox, dy = e.y - oy, rr = e.r + 8;
-        if (dx*dx + dy*dy < rr*rr){ e.orbCd = CONFIG.orbital.hitEvery; const d = Math.hypot(e.x-P.x, e.y-P.y) || 1; damageEnemy(e, CONFIG.orbital.damage*S.dmgMul, (e.x-P.x)/d, (e.y-P.y)/d); }
+        const dx = e.x - ox, dy = e.y - oy, rr = e.r + (blade ? 12 : 8);
+        if (dx*dx + dy*dy < rr*rr){
+          e.orbCd = CONFIG.orbital.hitEvery; const d = Math.hypot(e.x-P.x, e.y-P.y) || 1; damageEnemy(e, oDmg, (e.x-P.x)/d, (e.y-P.y)/d);
+          if (blade && S.bladeCd[i] <= 0){ S.bladeCd[i] = BL.novaEvery; explode(ox, oy, BL.novaRadius, oDmg, COL.violet); }
+        }
       });
       for (const s of S.eshots) if (!s.dead && (s.x-ox)**2 + (s.y-oy)**2 < 144){ s.dead = true; burst(s.x, s.y, COL.violet, 4, 120); }
     }
@@ -939,23 +989,41 @@ function update(dt){
   for (const b of S.bullets){
     b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
     if (b.life <= 0){ b.dead = true; continue; }
+    if (b.rail){ b.trailT -= dt; if (b.trailT <= 0 && S.trails.length < 260){ const R = CONFIG.evolutions.rail; b.trailT = R.trailEvery; S.trails.push({ x:b.x, y:b.y, life:R.trailLife, max:R.trailLife, dmg:b.dmg*R.trailDamage, dead:false }); } }
     gridQuery(b.x, b.y, 56, e => {
       if (b.dead || e.dead || b.hit.has(e)) return;
       const rr = e.r + (b.big ? 6 : 3), dx = e.x - b.x, dy = e.y - b.y;
       if (dx*dx + dy*dy < rr*rr){
-        b.hit.add(e); const sp = Math.hypot(b.vx,b.vy), crit = Math.random() < S.crit;
+        b.hit.add(e); const sp = Math.hypot(b.vx,b.vy), crit = b.exec || Math.random() < S.crit;
         damageEnemy(e, crit ? b.dmg*2 : b.dmg, b.vx/sp, b.vy/sp, crit);
+        if (b.exec){ const X = CONFIG.evolutions.exec; explode(b.x, b.y, X.radius, b.dmg*2*X.splash, COL.amber, e); }
         for (let i=0;i<3;i++) addPart(b.x, b.y, Math.atan2(-b.vy,-b.vx) + rand(-.8,.8), rand(60,180), .2, crit ? COL.amber : '#ffffff', 1.5);
         if (b.pierce > 0) b.pierce--;
         else if (b.bounce > 0){
           const nt = nearestFrom(b.x, b.y, 220, b.hit);
-          if (nt){ b.bounce--; const a = Math.atan2(nt.y-b.y, nt.x-b.x); b.vx = Math.cos(a)*sp; b.vy = Math.sin(a)*sp; b.life = Math.max(b.life, 220/sp + .1); }
+          if (nt){
+            b.bounce--; const a = Math.atan2(nt.y-b.y, nt.x-b.x); b.vx = Math.cos(a)*sp; b.vy = Math.sin(a)*sp; b.life = Math.max(b.life, 220/sp + .1);
+            if (S.evo.chain){   // split: a copy flies at the next-closest enemy
+              const nt2 = nearestFrom(b.x, b.y, 220, new Set([...b.hit, nt]));
+              if (nt2 && S.bullets.length < 300){ const a2 = Math.atan2(nt2.y-b.y, nt2.x-b.x); S.bullets.push({ ...b, vx:Math.cos(a2)*sp, vy:Math.sin(a2)*sp, hit:new Set(b.hit) }); }
+            }
+          }
           else b.dead = true;
         }
         else b.dead = true;
       }
     });
   }
+
+  // railstorm trails
+  for (const tr of S.trails){
+    tr.life -= dt; if (tr.life <= 0){ tr.dead = true; continue; }
+    gridQuery(tr.x, tr.y, 50, e => {
+      if (e.dead || (e.trailCd || 0) > S.t) return;
+      const rr = e.r + 7; if ((e.x-tr.x)**2 + (e.y-tr.y)**2 < rr*rr){ e.trailCd = S.t + .25; damageEnemy(e, tr.dmg, 0, 0); }
+    });
+  }
+  compact(S.trails);
 
   // enemy shots
   for (const s of S.eshots){
@@ -1060,11 +1128,17 @@ function render(dt){
 
   // orbitals
   for (let i=0;i<S.orbitals;i++){
-    const a = S.orbAngle + i/S.orbitals*TAU, sp = sprite('diamond', COL.violet, 7);
-    ctx.save(); ctx.translate(P.x + Math.cos(a)*CONFIG.orbital.radius, P.y + Math.sin(a)*CONFIG.orbital.radius); ctx.rotate(a + Math.PI/2);
+    const a = S.orbAngle + i/S.orbitals*TAU, sp = sprite('diamond', S.evo.blade ? '#e0d0ff' : COL.violet, S.evo.blade ? 10 : 7), oR = orbRadius();
+    ctx.save(); ctx.translate(P.x + Math.cos(a)*oR, P.y + Math.sin(a)*oR); ctx.rotate(a + Math.PI/2);
     ctx.drawImage(sp.cv, -sp.h, -sp.h, sp.h*2, sp.h*2); ctx.restore();
   }
 
+  // railstorm trails
+  if (S.trails.length){
+    ctx.fillStyle = COL.amber;
+    for (const tr of S.trails){ ctx.globalAlpha = tr.life/tr.max*.7; ctx.fillRect(tr.x-2.5, tr.y-2.5, 5, 5); }
+    ctx.globalAlpha = 1;
+  }
   // particles
   for (const p of S.parts){ ctx.globalAlpha = Math.max(0, p.life/p.max); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size); }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
@@ -1080,6 +1154,8 @@ function render(dt){
     ctx.lineTo(P.x + Math.cos(aim+.35)*(P.r+3), P.y + Math.sin(aim+.35)*(P.r+3)); ctx.lineTo(P.x + Math.cos(aim-.35)*(P.r+3), P.y + Math.sin(aim-.35)*(P.r+3));
     ctx.closePath(); ctx.fillStyle = S.color; ctx.fill();
   }
+  // juggernaut shield
+  if (alive && S.shieldT > 0){ ctx.strokeStyle = `rgba(63,243,255,${.4 + .4*Math.sin(now*18)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 16, 0, TAU); ctx.stroke(); }
   // ammo arc under the player
   if (alive && S.state !== 'menu'){
     const G = S.gun, R = P.r + 10, span = Math.min(2.6, .32*G.magSize), start = Math.PI/2 + span/2;
@@ -1217,7 +1293,7 @@ let autosaveT = 0;
 function saveRun(){
   if (!S || !['play','paused','levelup'].includes(S.state)) return;
   try {
-    const o = { ...S, v:1, bullets:[], eshots:[], parts:[], texts:[], rings:[], ripples:[], banner:null,
+    const o = { ...S, v:1, bullets:[], eshots:[], parts:[], texts:[], rings:[], ripples:[], trails:[], banner:null,
       bossIdx:S.boss ? S.enemies.indexOf(S.boss) : -1, boss:null, shake:0, hitstop:0, flash:0, state:'paused' };
     localStorage.setItem(RUN_KEY, JSON.stringify(o));
   } catch {}
@@ -1227,7 +1303,8 @@ function clearRun(){ try { localStorage.removeItem(RUN_KEY); } catch {} }
 function continueRun(){
   const o = loadRun(); if (!o){ refreshMenu(); return; }
   audioInit(); goFullscreen();
-  S = o; S.boss = o.bossIdx >= 0 ? S.enemies[o.bossIdx] || null : null; delete S.bossIdx;
+  newGame(); S = { ...S, ...o };   // fields added after this run was saved keep their fresh defaults
+  S.boss = o.bossIdx >= 0 ? S.enemies[o.bossIdx] || null : null; delete S.bossIdx;
   S.state = 'paused'; hudCache = {}; resetJoy(); autosaveT = 0;
   buildToggles(); show('paused');
 }
@@ -1313,15 +1390,25 @@ function openLevelUp(){
   $('luTitle').textContent = 'LEVEL ' + (S.level - S.pending + 1);
   if (buildCards()) show('levelup');
 }
+function evoHint(u){
+  const evo = UPGRADES.find(x => x.evo && !S.upgrades[x.id] && x.needs.includes(u.id));
+  if (!evo) return '';
+  const partner = upgradeById(evo.needs.find(id => id !== u.id));
+  return `<span class="hint">Evolves into ${evo.name} with ${partner.name}${isMaxed(partner.id) ? ' (maxed)' : ''}</span>`;
+}
 function buildCards(){
-  const pool = UPGRADES.filter(u => (S.upgrades[u.id] || 0) < u.max);
-  if (!pool.length){ S.pending = 0; S.player.hp = S.player.maxHp; resume(); return false; }
-  const picks = []; while (picks.length < 3 && pool.length) picks.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]);
+  const evos = UPGRADES.filter(evoReady);
+  const pool = UPGRADES.filter(u => !u.evo && (S.upgrades[u.id] || 0) < u.max);
+  if (!pool.length && !evos.length){ S.pending = 0; S.player.hp = S.player.maxHp; resume(); return false; }
+  const picks = evos.sort(() => Math.random() - .5).slice(0, 2);
+  while (picks.length < 3 && pool.length) picks.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]);
   const box = $('cards'); box.innerHTML = '';
   for (const u of picks){
     const lv = S.upgrades[u.id] || 0, b = document.createElement('button');
-    b.type = 'button'; b.className = 'card';
-    b.innerHTML = `<span class="tag">${lv ? 'LEVEL ' + (lv+1) : 'NEW'}</span><span class="nm">${u.name}</span><span class="ds">${u.desc}</span>${pips(u.max, lv+1)}`;
+    b.type = 'button'; b.className = 'card' + (u.evo ? ' evo' : '');
+    b.innerHTML = u.evo
+      ? `<span class="tag">EVOLUTION</span><span class="nm">${u.name}</span><span class="ds">${u.desc}</span><span class="hint">${u.needs.map(id => upgradeById(id).name).join(' + ')}</span>`
+      : `<span class="tag">${lv ? 'LEVEL ' + (lv+1) : 'NEW'}</span><span class="nm">${u.name}</span><span class="ds">${u.desc}</span>${pips(u.max, lv+1)}${evoHint(u)}`;
     b.addEventListener('click', () => {
       u.apply(); S.upgrades[u.id] = lv + 1; S.pending--;
       if (S.pending > 0) openLevelUp(); else { resume(); levelBlast(); }
@@ -1432,6 +1519,13 @@ const CHEATS = [
   [() => 'FULL HP',     () => { S.player.hp = S.player.maxHp; return 'HP refilled'; }],
   [() => 'KILL ALL',    () => { let n = 0; for (const e of S.enemies) if (!e.boss && !e.dead){ killEnemy(e); n++; } compact(S.enemies); return `Killed ${n} enemies`; }],
   [() => S.god ? 'GOD MODE: ON' : 'GOD MODE: OFF', () => { S.god = !S.god; return S.god ? 'You can\'t take damage' : 'Damage is back on'; }],
+  [() => 'READY EVOLUTION', () => {
+    const left = UPGRADES.filter(u => u.evo && !S.upgrades[u.id] && !evoReady(u));
+    if (!left.length) return 'Every evolution is ready or taken';
+    const evo = left[Math.floor(Math.random()*left.length)];
+    for (const id of evo.needs){ const u = upgradeById(id); while ((S.upgrades[id] || 0) < u.max){ u.apply(); S.upgrades[id] = (S.upgrades[id] || 0) + 1; } }
+    S.level++; S.pending++; return `${evo.name} offered when you resume`;
+  }],
   [() => '+100 SHARDS', () => { SAVE.shards += 100; persist(); return `${SAVE.shards} shards`; }],
 ];
 function buildDebug(){

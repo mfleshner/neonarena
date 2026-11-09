@@ -20,8 +20,9 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Every tunable number lives in `CONFIG` at the top of the script. Add new numbers there, not inline.
 
 ## Script map (in order)
-- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, spawn, difficulty, elite, boss, xp, enemies, controls, audio
+- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, evolutions, spawn, difficulty, elite, boss, xp, enemies, controls, audio
 - `UPGRADES` — in-run level-up choices (`id`, `name`, `desc`, `max`, `apply()` mutates `S`)
+- Evolutions: `UPGRADES` entries with `evo:true, needs:[a,b]`; offered (up to 2, shown first, gold card) once both parents are maxed (`evoReady`). Flags live in `S.evo` (chain, rail, exec, overflow, blade, jugg); numbers in `CONFIG.evolutions`. Helpers: `explode()`, `overflowRing()`, `orbRadius()`, rail `S.trails`. Level-up cards show an "Evolves into…" hint via `evoHint()`.
 - Canvas setup: `resize()` sets `W`, `H`, `DPR`, `SC` (world→screen scale = H / view.height)
 - Save data: `SAVE` (localStorage `neonArena.save`: shards, best, wins, ship, owned, perks, settings); `SET = SAVE.settings`; `persist()`
 - Audio (all synthesized): buses `BUS.master/sfx/music/duck` with a compressor; `audioLevels()` applies `SET.sound`, `SET.musicVol`, `SET.sfxVol` and ducks music when paused; `tone()`, `noise()`, `allow()` (limits the same sound in a burst); `sfx.*`. Music: `SONGS` (4-bar chord loops), step sequencer `playStep()` / `musicTick()` (called each frame, schedules 0.15s ahead), layers switch on by run time from `CONFIG.audio.layers`, boss track in boss phase, low-HP heartbeat. `buzz()` vibration; `goFullscreen()` (fullscreen + landscape lock on Android)
@@ -39,7 +40,7 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - HUD: DOM elements updated in `updateHud()` with `setText()` caching
 - Screens: `SCREENS` list + `show(id)`; builders `buildShips()`, `buildShop()`, `buildToggles()` (fills both `#toggles` on pause and `#optToggles` in Options), `buildCards()` for level-ups
 - Run flow: `start()`, `pause()`, `resume()`, `openLevelUp()`, `beginEnd(won)`, `finishRun()` (awards shards, best, wins)
-- Run save: `saveRun()` / `loadRun()` / `clearRun()` / `continueRun()` (localStorage `neonArena.run`, `v:1`; drops bullets/effects; boss restored via `bossIdx`). Saved on pause, tab hidden, menu, and every 10s. Cleared on new run and on death/win. If `S` gains fields, they save automatically; bump `v` only for breaking changes.
+- Run save: `saveRun()` / `loadRun()` / `clearRun()` / `continueRun()` (localStorage `neonArena.run`, `v:1`; drops bullets/effects; boss restored via `bossIdx`). Saved on pause, tab hidden, menu, and every 10s. Cleared on new run and on death/win. If `S` gains fields, they save automatically, and `continueRun()` merges a loaded run over a fresh `newGame()` state so older saves get new fields' defaults; bump `v` only for breaking changes.
 - Debug panel: `DEBUG_ROWS` (tunable paths into `CONFIG`, with `live` hooks into `S`), `CHEATS`, `buildDebug()`, `openDebug()`; tweaks persist in localStorage `neonArena.debug` and are applied over `CONFIG` at load (`DEFAULT_CONFIG` keeps the originals). Cheats set `S.cheated`, which blocks records. Open: tap PAUSED 5×, ` key, or controller Y on pause.
 - `frame()` — main loop: `pollPad`, hitstop, update or ending slow-mo, render, HUD
 
