@@ -68,6 +68,19 @@ Maxing two related upgrades unlocks a powered-up version on the next level-up.
 - Flashes when a shrink is coming
 - Option to hide it in Options
 
+## 6. Nuke (screen-clear bomb)
+- Earn 1 nuke charge per 1,000 kills (`CONFIG.nuke.killsPerCharge`), carried across the run, with a cap (e.g. 3)
+- Activating it destroys every enemy currently on screen; enemies off screen are not affected
+- Bosses take heavy damage instead of dying (e.g. 10% of max HP); elites die
+- Enemy shots on screen are cleared too
+- Kills from a nuke still drop XP gems and count toward the next charge
+- Controls: a nuke button on the HUD (touch/mouse, near the ammo readout), controller Y during play, keyboard N
+- HUD shows the charge count and a progress bar toward the next charge
+- Big effect: white flash, expanding shockwave ring from the player, screen shake, hit-stop, a deep boom
+- Brief cooldown after use so it can't be double-tapped by accident
+- Saved with the run; debug panel gets a "+1 NUKE" cheat
+- Shop idea for later: a perk that lowers the kills needed per charge
+
 ## Backlog (not scheduled)
 - Walled arena mode (fixed border that doesn't shrink)
 - Landmarks: pillars and obstacles that block movement and bullets
