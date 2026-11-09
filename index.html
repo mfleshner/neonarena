@@ -56,6 +56,7 @@ body{font-family:var(--ui);-webkit-user-select:none;user-select:none;-webkit-tou
 .btns{display:flex;gap:8px;justify-content:flex-end}
 .btns button{pointer-events:auto;font-family:var(--ui);font-weight:700;font-size:11px;letter-spacing:.12em;color:var(--text);background:rgba(7,6,15,.6);border:1px solid var(--line);border-radius:4px;padding:8px 11px;cursor:pointer}
 button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+body.pad .screen button:focus{outline:2px solid var(--cyan);outline-offset:3px;box-shadow:0 0 16px rgba(63,243,255,.4)}
 .bottom{display:flex;justify-content:flex-end}
 .ammo{font-weight:700;font-size:13px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 8px rgba(63,243,255,.6);font-variant-numeric:tabular-nums;min-width:120px;text-align:right}
 .ammo.reload{color:var(--amber);text-shadow:0 0 8px rgba(255,194,61,.6)}
@@ -128,10 +129,10 @@ body.portrait #rotate{display:grid}
   <div class="box">
     <div class="shardline"><span id="menuShards">0</span> SHARDS</div>
     <h1>NEON <em>ARENA</em></h1>
-    <div class="how"><span><b>Left thumb</b> move</span><span><b>Tap right side</b> fire one shot</span><span><b>Stop firing</b> to reload</span><span><b>PC</b> WASD + mouse aim, click to fire</span></div>
+    <div class="how"><span><b>Left thumb</b> move</span><span><b>Tap right side</b> fire one shot</span><span><b>Stop firing</b> to reload</span><span><b>PC</b> WASD + mouse aim, click to fire</span><span><b>Controller</b> sticks to move and aim, RT or A to fire</span></div>
     <div class="row"><button class="primary" id="continueBtn" type="button" hidden>CONTINUE</button><button class="primary" id="startBtn" type="button">START</button></div>
     <div class="small" id="continueInfo" hidden></div>
-    <div class="row"><button class="ghost" id="shipsBtn" type="button">SHIP: STRIKER</button><button class="ghost" id="shopBtn" type="button">UPGRADES</button></div>
+    <div class="row"><button class="ghost" id="shipsBtn" type="button">SHIP: STRIKER</button><button class="ghost" id="shopBtn" type="button">UPGRADES</button><button class="ghost" id="optionsBtn" type="button">OPTIONS</button></div>
     <div class="small" id="bestText">Survive 10:00, then destroy the Overseer</div>
   </div>
 </div>
@@ -152,6 +153,15 @@ body.portrait #rotate{display:grid}
     <div class="small">Permanent bonuses for every run</div>
     <div class="cards shop" id="shopCards"></div>
     <button class="ghost" id="shopBack" type="button">BACK</button>
+  </div>
+</div>
+
+<div class="screen" id="options" hidden>
+  <div class="box">
+    <h2>OPTIONS</h2>
+    <div class="row" id="optToggles"></div>
+    <div class="small">Aim by device: auto-aim on touch, manual with a mouse or controller. Manual on touch fires the way you're moving.</div>
+    <button class="ghost" id="optionsBack" type="button">BACK</button>
   </div>
 </div>
 
@@ -253,7 +263,7 @@ const CONFIG = {
     shard:   { shape:'tri',     color:'#d39bff', hp:6,  speed:115, r:7,  dmg:5,  xp:0, weight:0,  from:1e9 },
   },
 
-  controls: { joystickZone: 0.45, joyRadius: 56, mouseAim: true },   // mouseAim: on PC, aim at the cursor instead of auto-aim
+  controls: { joystickZone: 0.45, joyRadius: 56, padDeadzone: 0.2, padAimThreshold: 0.35 },
 };
 
 const UPGRADES = [
@@ -296,7 +306,7 @@ function compact(arr){ let j=0; for (let i=0;i<arr.length;i++){ if(!arr[i].dead)
 
 /* ---------- save data ---------- */
 const DEFAULT_SAVE = { shards:0, best:{ time:0, kills:0 }, wins:0, ship:'striker', owned:['striker'], perks:{},
-  settings:{ sound:true, vibrate:true, shake:true, damageNumbers:true, fps:false } };
+  settings:{ aim:'device', sound:true, vibrate:true, shake:true, damageNumbers:true, fps:false } };
 function loadSave(){
   const s = JSON.parse(JSON.stringify(DEFAULT_SAVE));
   try {
@@ -419,9 +429,15 @@ window.NEON = { CONFIG, UPGRADES, SAVE, get S(){ return S; } };   // poke at it 
 const joy = { id:null, bx:0, by:0, x:0, y:0, dx:0, dy:0 };
 const keys = { up:false, down:false, left:false, right:false };
 const mouse = { x:0, y:0 };
-let inputMode = 'touch';                       // switches to 'mouse' as soon as a mouse is used
-const mouseAiming = () => inputMode === 'mouse' && CONFIG.controls.mouseAim;
+let inputMode = 'touch';                       // 'touch' | 'mouse' | 'gamepad', whichever was used last
 const mouseAngle = () => Math.atan2(mouse.y - H/2, mouse.x - W/2);   // the camera keeps the player centered
+// Aim setting: 'device' = auto-aim on touch, manual with mouse or controller; 'auto' / 'manual' force it everywhere.
+function manualAim(){ return SET.aim === 'manual' || (SET.aim === 'device' && inputMode !== 'touch'); }
+function manualAngle(){
+  if (inputMode === 'mouse') return mouseAngle();
+  if (inputMode === 'gamepad' && gp.aimSet) return gp.aim;
+  return S.player.face;                        // touch in manual mode fires the way you're moving
+}
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault(); audioInit();
@@ -458,6 +474,70 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Escape' || e.code === 'KeyP'){ S.state === 'play' ? pause() : S.state === 'paused' && resume(); }
 });
 window.addEventListener('keyup', e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
+window.addEventListener('pointerdown', () => document.body.classList.remove('pad'), true);
+
+/* ---------- controller (standard mapping: Xbox-style layout) ---------- */
+const gp = { mx:0, my:0, aim:0, aimSet:false, prev:[], navT:0, navDir:'' };
+const PAD = { A:0, B:1, X:2, Y:3, LB:4, RB:5, LT:6, RT:7, BACK:8, START:9, UP:12, DOWN:13, LEFT:14, RIGHT:15 };
+window.addEventListener('gamepaddisconnected', () => { gp.mx = gp.my = 0; if (S.state === 'play') pause(); });
+function pollPad(dt){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let p = null; for (const x of pads) if (x && x.connected){ p = x; break; }
+  if (!p){ gp.mx = gp.my = 0; return; }
+  const C = CONFIG.controls, dz = v => Math.abs(v) < C.padDeadzone ? 0 : v;
+  const down = i => !!(p.buttons[i] && (p.buttons[i].pressed || p.buttons[i].value > .5));
+  const hit = i => down(i) && !gp.prev[i];
+  let lx = dz(p.axes[0] || 0), ly = dz(p.axes[1] || 0);
+  if (down(PAD.LEFT)) lx = -1; if (down(PAD.RIGHT)) lx = 1; if (down(PAD.UP)) ly = -1; if (down(PAD.DOWN)) ly = 1;
+  const l = Math.hypot(lx, ly); if (l > 1){ lx /= l; ly /= l; }
+  const rx = p.axes[2] || 0, ry = p.axes[3] || 0, rl = Math.hypot(rx, ry);
+  let active = l > 0 || rl > C.padAimThreshold;
+  for (let i=0;i<p.buttons.length;i++) if (down(i)) active = true;
+  if (active && inputMode !== 'gamepad'){ inputMode = 'gamepad'; resetJoy(); }
+  if (rl > C.padAimThreshold){ gp.aim = Math.atan2(ry, rx); gp.aimSet = true; }
+
+  if (S.state === 'play'){
+    gp.mx = lx; gp.my = ly;
+    if (hit(PAD.RT) || hit(PAD.RB) || hit(PAD.LT) || hit(PAD.A)){ audioInit(); tap(); }
+    if (hit(PAD.START) || hit(PAD.BACK)) pause();
+  } else {
+    gp.mx = gp.my = 0;
+    let dir = '';
+    if (ly < -.5) dir = 'up'; else if (ly > .5) dir = 'down'; else if (lx < -.5) dir = 'left'; else if (lx > .5) dir = 'right';
+    if (dir){
+      if (dir !== gp.navDir) gp.navT = 0;
+      gp.navT -= dt;
+      if (gp.navT <= 0){ navMove(dir); gp.navT = gp.navDir === dir ? .14 : .35; }
+    }
+    gp.navDir = dir;
+    if (hit(PAD.A)){
+      audioInit();
+      const el = document.activeElement;
+      if (el && visibleButtons().includes(el)) el.click(); else navMove('down');
+    }
+    if (hit(PAD.B)) navBack();
+    if (hit(PAD.START)){ if (S.state === 'paused') resume(); else if (S.state !== 'levelup') visibleButtons()[0]?.click(); }
+  }
+  gp.prev = p.buttons.map((_, i) => down(i));
+}
+function activeScreen(){ return SCREENS.map(id => $(id)).find(el => !el.hidden) || null; }
+function visibleButtons(){ const s = activeScreen(); return s ? [...s.querySelectorAll('button')].filter(b => !b.hidden && b.offsetParent !== null) : []; }
+function navMove(dir){
+  const bs = visibleButtons(); if (!bs.length) return;
+  let i = bs.indexOf(document.activeElement);
+  i = i < 0 ? 0 : (i + (dir === 'up' || dir === 'left' ? -1 : 1) + bs.length) % bs.length;
+  document.body.classList.add('pad'); bs[i].focus();
+}
+function navBack(){
+  const s = activeScreen(); if (!s) return;
+  const back = { ships:'shipsBack', shop:'shopBack', options:'optionsBack' }[s.id];
+  if (back) $(back).click(); else if (s.id === 'paused') resume();
+}
+function keepFocus(fn){   // rebuild a button list without losing the controller's place
+  const i = visibleButtons().indexOf(document.activeElement);
+  fn();
+  if (i >= 0){ const nb = visibleButtons(); nb[Math.min(i, nb.length-1)]?.focus(); }
+}
 
 /* ---------- gun ---------- */
 function tap(){
@@ -480,9 +560,9 @@ function nearestFrom(x, y, range, exclude){
   return best;
 }
 function fire(){
-  const P = S.player, G = S.gun, t = mouseAiming() ? null : nearestEnemy(G.range);
+  const P = S.player, G = S.gun, manual = manualAim(), t = manual ? null : nearestEnemy(G.range);
   let a = P.face;
-  if (mouseAiming()) a = mouseAngle();
+  if (manual) a = manualAngle();
   else if (t){ // auto-aim: lead the target a little
     const d = Math.hypot(t.x-P.x, t.y-P.y), tt = d / G.bulletSpeed;
     const vx = (P.x - t.x), vy = (P.y - t.y), vl = Math.hypot(vx,vy) || 1;
@@ -620,6 +700,7 @@ function update(dt){
   // movement
   let mx, my;
   if (joy.id !== null){ mx = joy.dx; my = joy.dy; }
+  else if (gp.mx || gp.my){ mx = gp.mx; my = gp.my; }
   else { mx = (keys.right?1:0) - (keys.left?1:0); my = (keys.down?1:0) - (keys.up?1:0); const l = Math.hypot(mx,my); if (l > 1){ mx/=l; my/=l; } }
   P.x += mx*P.speed*dt; P.y += my*P.speed*dt;
   if (mx || my){
@@ -839,7 +920,7 @@ function render(dt){
     const sp = sprite('circle', S.color, P.r);
     ctx.drawImage(sp.cv, P.x-sp.h, P.y-sp.h, sp.h*2, sp.h*2);
     ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(P.x, P.y, 3, 0, TAU); ctx.fill();
-    const aim = mouseAiming() && S.state !== 'menu' ? mouseAngle() : S.state === 'play' && S.idle < .5 ? S.aim : P.face;
+    const aim = manualAim() && S.state !== 'menu' ? manualAngle() : S.state === 'play' && S.idle < .5 ? S.aim : P.face;
     ctx.beginPath(); ctx.moveTo(P.x + Math.cos(aim)*(P.r+8), P.y + Math.sin(aim)*(P.r+8));
     ctx.lineTo(P.x + Math.cos(aim+.35)*(P.r+3), P.y + Math.sin(aim+.35)*(P.r+3)); ctx.lineTo(P.x + Math.cos(aim-.35)*(P.r+3), P.y + Math.sin(aim-.35)*(P.r+3));
     ctx.closePath(); ctx.fillStyle = S.color; ctx.fill();
@@ -908,10 +989,12 @@ function render(dt){
   for (const r of S.ripples){ r.life -= dt; const k = 1 - r.life/.35; ctx.strokeStyle = `rgba(63,243,255,${Math.max(0,.6*(1-k))})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(r.x, r.y, 14 + k*30, 0, TAU); ctx.stroke(); }
   S.ripples = S.ripples.filter(r => r.life > 0);
   // crosshair (mouse play)
-  const showCross = mouseAiming() && S.state === 'play';
-  canvas.style.cursor = showCross ? 'none' : '';
+  const showCross = manualAim() && S.state === 'play' && (inputMode === 'mouse' || inputMode === 'gamepad');
+  canvas.style.cursor = showCross && inputMode === 'mouse' ? 'none' : '';
   if (showCross){
-    const mx = mouse.x, my = mouse.y, c = S.reloading ? COL.amber : S.ammo === 0 ? COL.danger : S.color;
+    const ca = manualAngle(), reach = 95*SC;
+    const mx = inputMode === 'mouse' ? mouse.x : W/2 + Math.cos(ca)*reach, my = inputMode === 'mouse' ? mouse.y : H/2 + Math.sin(ca)*reach;
+    const c = S.reloading ? COL.amber : S.ammo === 0 ? COL.danger : S.color;
     ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.arc(mx, my, 9, 0, TAU);
     for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ ctx.moveTo(mx + dx*13, my + dy*13); ctx.lineTo(mx + dx*19, my + dy*19); }
@@ -920,10 +1003,11 @@ function render(dt){
     ctx.fillStyle = '#ffffff'; ctx.fillRect(mx - 1, my - 1, 2, 2);
   }
   // first-seconds hints
-  if (S.state === 'play' && S.t < 7 && inputMode === 'mouse'){
+  if (S.state === 'play' && S.t < 7 && inputMode !== 'touch'){
     ctx.globalAlpha = Math.min(1, (7 - S.t)/2) * .55; ctx.fillStyle = COL.cyan;
     ctx.font = '700 12px "Chakra Petch", ui-monospace, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('WASD TO MOVE · CLICK TO FIRE · STOP FIRING TO RELOAD', W/2, H*.78);
+    ctx.fillText(inputMode === 'mouse' ? 'WASD TO MOVE · CLICK TO FIRE · STOP FIRING TO RELOAD'
+      : (manualAim() ? 'LEFT STICK MOVE · RIGHT STICK AIM · ' : 'LEFT STICK MOVE · ') + 'RT OR A TO FIRE · STOP FIRING TO RELOAD', W/2, H*.78);
     ctx.globalAlpha = 1;
   }
   else if (S.state === 'play' && S.t < 7){
@@ -960,8 +1044,12 @@ function updateHud(){
 }
 
 /* ---------- screens ---------- */
-const SCREENS = ['menu','ships','shop','levelup','paused','over'];
-function show(id){ SCREENS.forEach(s => $(s).hidden = s !== id); $('hud').hidden = ['menu','ships','shop','over'].includes(id); }
+const SCREENS = ['menu','ships','shop','options','levelup','paused','over'];
+function show(id){
+  SCREENS.forEach(s => $(s).hidden = s !== id);
+  $('hud').hidden = ['menu','ships','shop','options','over'].includes(id);
+  if (id && inputMode === 'gamepad'){ document.body.classList.add('pad'); visibleButtons()[0]?.focus(); }
+}
 const pips = (n, on) => `<span class="pips">${Array.from({length:n},(_,i)=>`<i class="${i<on?'on':''}"></i>`).join('')}</span>`;
 
 /* ---------- run save (resume a run after closing the app) ---------- */
@@ -1011,7 +1099,7 @@ function buildShips(){
     b.innerHTML = `<span class="tag">${sel ? 'EQUIPPED' : owned ? 'TAP TO EQUIP' : sh.cost + ' SHARDS'}</span><span class="nm" style="color:${sh.color}"><i></i><span style="color:var(--text)">${sh.name}</span></span><span class="ds">${sh.desc}</span>`;
     b.addEventListener('click', () => {
       if (!owned){ if (!afford) return; SAVE.shards -= sh.cost; SAVE.owned.push(id); sfx.buy(); }
-      SAVE.ship = id; persist(); newGame(); buildShips();
+      SAVE.ship = id; persist(); newGame(); keepFocus(buildShips);
     });
     box.appendChild(b);
   }
@@ -1026,20 +1114,27 @@ function buildShop(){
     b.innerHTML = `<span class="tag">${maxed ? 'MAXED' : cost + ' SHARDS'}</span><span class="nm">${p.name}</span><span class="ds">${p.desc}</span>${pips(p.max, lv)}`;
     b.addEventListener('click', () => {
       if (maxed || !afford) return;
-      SAVE.shards -= cost; SAVE.perks[p.id] = lv + 1; persist(); sfx.buy(); newGame(); buildShop();
+      SAVE.shards -= cost; SAVE.perks[p.id] = lv + 1; persist(); sfx.buy(); newGame(); keepFocus(buildShop);
     });
     box.appendChild(b);
   }
 }
 
 const TOGGLES = [['sound','SOUND'],['vibrate','VIBRATION'],['shake','SHAKE'],['damageNumbers','DAMAGE NUMBERS'],['fps','FPS']];
+const AIM_MODES = ['device','auto','manual'], AIM_LABEL = { device:'AIM: BY DEVICE', auto:'AIM: ALWAYS AUTO', manual:'AIM: ALWAYS MANUAL' };
 function buildToggles(){
-  const box = $('toggles'); box.innerHTML = '';
-  for (const [k, label] of TOGGLES){
-    const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost';
-    b.setAttribute('aria-pressed', String(!!SET[k])); b.textContent = `${label} ${SET[k] ? 'ON' : 'OFF'}`;
-    b.addEventListener('click', () => { SET[k] = !SET[k]; persist(); buildToggles(); syncMute(); });
-    box.appendChild(b);
+  for (const boxId of ['toggles','optToggles']){
+    const box = $(boxId); box.innerHTML = '';
+    const aim = document.createElement('button'); aim.type = 'button'; aim.className = 'ghost';
+    aim.textContent = AIM_LABEL[SET.aim] || AIM_LABEL.device;
+    aim.addEventListener('click', () => { SET.aim = AIM_MODES[(AIM_MODES.indexOf(SET.aim) + 1) % AIM_MODES.length]; persist(); keepFocus(buildToggles); });
+    box.appendChild(aim);
+    for (const [k, label] of TOGGLES){
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost';
+      b.setAttribute('aria-pressed', String(!!SET[k])); b.textContent = `${label} ${SET[k] ? 'ON' : 'OFF'}`;
+      b.addEventListener('click', () => { SET[k] = !SET[k]; persist(); keepFocus(buildToggles); syncMute(); });
+      box.appendChild(b);
+    }
   }
 }
 function syncMute(){ $('muteBtn').textContent = SET.sound ? 'SFX ON' : 'SFX OFF'; }
@@ -1071,7 +1166,7 @@ function buildCards(){
   const rr = $('rerollBtn'); rr.hidden = S.rerolls <= 0; rr.textContent = `REROLL (${S.rerolls})`;
   return true;
 }
-$('rerollBtn').addEventListener('click', () => { if (S.rerolls > 0){ S.rerolls--; buildCards(); } });
+$('rerollBtn').addEventListener('click', () => { if (S.rerolls > 0){ S.rerolls--; keepFocus(buildCards); } });
 
 function beginEnd(won){
   if (S.state === 'ending' || S.state === 'over') return;
@@ -1105,6 +1200,8 @@ $('shipsBtn').addEventListener('click', () => { buildShips(); show('ships'); });
 $('shopBtn').addEventListener('click', () => { buildShop(); show('shop'); });
 $('shipsBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
 $('shopBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
+$('optionsBtn').addEventListener('click', () => { buildToggles(); show('options'); });
+$('optionsBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
 $('pauseBtn').addEventListener('click', pause);
 $('resumeBtn').addEventListener('click', resume);
 $('muteBtn').addEventListener('click', () => { SET.sound = !SET.sound; persist(); syncMute(); });
@@ -1119,6 +1216,7 @@ let last = performance.now(), fpsSmooth = 60;
 function frame(now){
   const raw = Math.max(.001, (now - last)/1000), dt = Math.min(raw, 1/30); last = now;
   fpsSmooth = fpsSmooth*.95 + (1/raw)*.05;
+  pollPad(raw);
   const portrait = portraitMQ.matches;
   document.body.classList.toggle('portrait', portrait);
   if (S.hitstop > 0) S.hitstop -= raw;
