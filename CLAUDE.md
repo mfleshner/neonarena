@@ -16,7 +16,7 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - **Magazine + idle reload**: reload starts after `reloadDelay` seconds of not firing, or right away at 0 ammo. Tapping during a reload cancels it if ammo > 0.
 - **Aim**: setting `SET.aim` = `device` (default: auto-aim on touch, manual with mouse/controller) | `auto` | `manual`. Auto-aim targets the nearest enemy with a small lead.
 - **Infinite map**: camera keeps the player centered; enemies spawn on a ring around the view and far ones are recycled back to the ring.
-- **Run**: survive `runSeconds` (600), then the Overseer boss spawns; killing it wins.
+- **Run**: a midway boss at 5:00; survive `runSeconds` (600), then a final boss spawns; killing it wins.
 - Every tunable number lives in `CONFIG` at the top of the script. Add new numbers there, not inline.
 
 ## Script map (in order)
@@ -33,8 +33,9 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Input: touch joystick (`joy`, left `joystickZone` of screen) + tap right side; keyboard (`KEYMAP`, Space fires); mouse (`mouse`, click fires); `inputMode` = touch | mouse | gamepad; `manualAim()`, `manualAngle()`
 - Controller: `gp`, `PAD` (standard mapping), `pollPad(dt)` called each frame; menu nav via `visibleButtons()`, `navMove()`, `navBack()`, `keepFocus(fn)` (use when rebuilding button lists)
 - Gun: `tap()`, `fire()`, `nearestEnemy()`, `nearestFrom()`
-- Spawning: `spawnEnemy(type,x,y,elite)`, `spawnBoss()`, `eshot()` (enemy bullets)
-- Combat: `damageEnemy()`, `killEnemy()`, `hurt()`, `addXp()`, `pulseNova()`, `levelBlast()`; boss AI `updateBoss()`
+- Spawning: `spawnEnemy(type,x,y,elite)`, `eshot(x,y,a,speed,dmg,life,r)` (enemy bullets; speed 0 = lingering mine)
+- Bosses: `makeBoss(kind,def,final)`; final boss `spawnBoss()` uses `S.finalKind` (random from `CONFIG.finalBosses.pick`: overseer | conductor) and sets `S.boss`; midway boss `spawnMidBoss(kind)` at `CONFIG.midBoss.at` (prime | hive | lancer) sets `S.midBoss`. `bossDef(e)` returns a boss's config; AI in `BOSS_AI[kind]` via `updateBoss()`. Killing a final boss (`e.final`) wins; a midway boss drops a chest (`openChest()`: random ready evolution, else a free level-up), a heal and XP. Bosses use `windup` (charge line) and `blinkT/bx/by` (teleport marker) for telegraphs.
+- Combat: `damageEnemy()`, `killEnemy()`, `hurt()`, `addXp()`, `pulseNova()`, `levelBlast()`
 - `update(dt)` — gameplay; `updateFx(dt)` — particles/texts/rings/shake (also runs during `ending` slow-mo)
 - `render(dt)` — world pass (grid, gems, enemies, bullets, player, ammo arc) then screen pass (vignette, boss bar, banner, joystick, crosshair, hints, FPS)
 - HUD: DOM elements updated in `updateHud()` with `setText()` caching

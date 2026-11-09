@@ -284,6 +284,25 @@ const CONFIG = {
   elite: { hpMul: 10, sizeMul: 1.7, speedMul: 0.85, xp: 30 },
   boss: { enabled: true, name: 'OVERSEER', hp: 9000, r: 44, speed: 55, dmg: 25, color: '#ff3d9a',
           patternEvery: 2.6, novaCount: 18, shotSpeed: 170, shotDmg: 12, chargeSpeed: 340, spawnMul: 0.4 },
+  // Final boss is picked at random from `pick` each run. The Overseer's numbers are in `boss` above.
+  finalBosses: {
+    pick: ['overseer', 'conductor'],
+    conductor: { name: 'CONDUCTOR', shape: 'star', color: '#a98bff', hp: 9000, r: 42, speed: 45, dmg: 25,
+                 patternEvery: 2.4, shotSpeed: 190, shotDmg: 12, mineCount: 14, mineRadius: 170, mineLife: 5,
+                 summonCount: 10, blinkDist: 240, blinkTime: 0.6 },
+  },
+  // Midway boss: one of `kinds` at random, `at` seconds into the run. Killing it drops a heal and an evolution chest.
+  midBoss: {
+    enabled: true, at: 300, spawnMul: 0.6, heal: 40,
+    kinds: {
+      prime:  { name: 'SPLITTER PRIME', shape: 'square',  color: '#b06bff', hp: 2500, r: 38, speed: 58, dmg: 18,
+                slamEvery: 4, slamCount: 12, shotSpeed: 150, shotDmg: 9, splitAt: [0.75, 0.5, 0.25], childHp: 260, childR: 18 },
+      hive:   { name: 'THE HIVE',       shape: 'pent',    color: '#4dffc3', hp: 2200, r: 34, speed: 70, dmg: 15,
+                keepAway: 260, swarmEvery: 3, swarmCount: 8, volleyEvery: 5, shotSpeed: 170, shotDmg: 9 },
+      lancer: { name: 'LANCER',         shape: 'diamond', color: '#ff8a3d', hp: 2000, r: 30, speed: 50, dmg: 22,
+                aimTime: 0.8, dashSpeed: 560, dashTime: 0.6, restTime: 1.2, trailEvery: 0.035, trailLife: 2.5, trailDmg: 8 },
+    },
+  },
 
   xp: { first: 6, growth: 1.22, add: 2 },
 
@@ -471,7 +490,7 @@ const mus = { mode:'off', step:0, nextT:0 };
 let hbT = 0;
 function musicMode(){
   if (!S) return 'off';
-  if (['play','levelup','paused'].includes(S.state)) return S.bossPhase ? 'boss' : 'run';
+  if (['play','levelup','paused'].includes(S.state)) return S.bossPhase || bossAlive(S.midBoss) ? 'boss' : 'run';
   if (S.state === 'menu') return 'menu';
   return 'off';
 }
@@ -595,7 +614,8 @@ function newGame(){
     orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
-    shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, endT:0, endWon:false,
+    shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, midBoss:null, midSpawned:false,
+    finalKind:CONFIG.finalBosses.pick[Math.floor(Math.random()*CONFIG.finalBosses.pick.length)], endT:0, endWon:false,
   };
 }
 newGame();
@@ -782,16 +802,34 @@ function spawnEnemy(type, x, y, elite=false){
     elite, boss:false, kx:0, ky:0, flash:0, orbCd:0, rot:0, spawnT:.3, dead:false };
   S.enemies.push(e); return e;
 }
-function spawnBoss(){
-  const B = CONFIG.boss, P = S.player, a = rand(0, TAU), R = spawnRadius()*.8;
-  const e = { type:'boss', shape:'star', color:B.color, x:P.x + Math.cos(a)*R, y:P.y + Math.sin(a)*R, hp:B.hp, maxHp:B.hp, speed:B.speed, r:B.r, dmg:B.dmg, xp:0,
-    splits:0, elite:true, boss:true, kx:0, ky:0, flash:0, orbCd:0, rot:0, spawnT:.6, dead:false,
-    patT:2.5, pat:0, spiral:0, spiralCd:0, spA:0, windup:0, charging:0, cdx:0, cdy:0 };
-  S.enemies.push(e); S.boss = e;
-  S.banner = { txt:B.name, sub:'DESTROY IT TO WIN', life:2.8 };
-  sfx.boss(); buzz(120);
+function bossDef(e){
+  if (e.final) return e.kind === 'conductor' ? CONFIG.finalBosses.conductor : CONFIG.boss;
+  return CONFIG.midBoss.kinds[e.kind] || CONFIG.boss;
 }
-function eshot(x, y, a, sp, dmg){ if (S.eshots.length < 400) S.eshots.push({ x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life:4, dmg, dead:false }); }
+function makeBoss(kind, def, final){
+  const P = S.player, a = rand(0, TAU), R = spawnRadius()*.8;
+  const e = { type:'boss', kind, final, shape:def.shape || 'star', color:def.color, x:P.x + Math.cos(a)*R, y:P.y + Math.sin(a)*R,
+    hp:def.hp, maxHp:def.hp, speed:def.speed, r:def.r, baseR:def.r, dmg:def.dmg, xp:0,
+    splits:0, elite:true, boss:true, kx:0, ky:0, flash:0, orbCd:0, rot:0, spawnT:.6, dead:false,
+    patT:2.5, pat:0, spiral:0, spiralCd:0, spA:0, windup:0, charging:0, cdx:0, cdy:0, phase:0, aux:3, blinkT:0, bx:0, by:0 };
+  S.enemies.push(e);
+  sfx.boss(); buzz(120);
+  return e;
+}
+function spawnBoss(){
+  const kind = CONFIG.finalBosses.pick.includes(S.finalKind) ? S.finalKind : 'overseer';
+  S.boss = makeBoss(kind, kind === 'conductor' ? CONFIG.finalBosses.conductor : CONFIG.boss, true);
+  S.banner = { txt:bossDef(S.boss).name, sub:'DESTROY IT TO WIN', life:2.8 };
+}
+function spawnMidBoss(kind){
+  const kinds = Object.keys(CONFIG.midBoss.kinds);
+  kind ||= kinds[Math.floor(Math.random()*kinds.length)];
+  S.midSpawned = true;
+  S.midBoss = makeBoss(kind, CONFIG.midBoss.kinds[kind], false);
+  S.banner = { txt:CONFIG.midBoss.kinds[kind].name, sub:'MIDWAY BOSS', life:2.8 };
+}
+const bossAlive = b => b && !b.dead;
+function eshot(x, y, a, sp, dmg, life = 4, r = 5){ if (S.eshots.length < 400){ const s = { x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life, max:life, dmg, r, dead:false }; S.eshots.push(s); return s; } }
 
 /* ---------- combat helpers ---------- */
 function addPart(x,y,a,sp,life,color,size){ if (S.parts.length > 520) return; S.parts.push({ x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life, max:life, color, size, dead:false }); }
@@ -810,10 +848,16 @@ function killEnemy(e){
   burst(e.x, e.y, e.elite ? COL.amber : e.color, e.boss ? 120 : e.elite ? 40 : 10, e.boss ? 500 : e.elite ? 320 : 200);
   ring(e.x, e.y, e.r*2.4, e.elite ? COL.amber : e.color, e.elite ? .5 : .28);
   if (e.xp > 0) dropGem(e.x, e.y, e.xp, 'xp');
-  if (e.elite && !e.boss){ dropGem(e.x + 12, e.y, 30, 'heal'); if (SET.shake) S.shake = Math.min(16, S.shake + 6); S.hitstop = .06; }
+  if (e.elite && !e.boss && !e.noHeal){ dropGem(e.x + 12, e.y, 30, 'heal'); if (SET.shake) S.shake = Math.min(16, S.shake + 6); S.hitstop = .06; }
   for (let i=0;i<e.splits;i++){ const a = i/e.splits*TAU, c = spawnEnemy(e.splitInto, e.x + Math.cos(a)*8, e.y + Math.sin(a)*8); c.kx = Math.cos(a)*160; c.ky = Math.sin(a)*160; c.spawnT = 0; }
   sfx.kill(e);
-  if (e.boss){ S.hitstop = .25; S.flash = .5; ring(e.x, e.y, 260, '#ffffff', 1); beginEnd(true); }
+  if (e.boss && e.final !== false){ S.hitstop = .25; S.flash = .5; ring(e.x, e.y, 260, '#ffffff', 1); beginEnd(true); }
+  else if (e.boss){
+    S.hitstop = .15; S.flash = .3; ring(e.x, e.y, 200, '#ffffff', .8);
+    dropGem(e.x - 14, e.y, 1, 'chest'); dropGem(e.x + 14, e.y, CONFIG.midBoss.heal, 'heal');
+    for (let i=0;i<10;i++) dropGem(e.x + rand(-30,30), e.y + rand(-30,30), 5, 'xp');
+    S.banner = { txt:'BOSS DOWN', sub:'GRAB THE CHEST', life:2 };
+  }
 }
 function dropGem(x,y,v,kind){
   if (kind === 'xp' && S.gems.length > 400){ addXp(v); return; }
@@ -848,6 +892,18 @@ function overflowRing(){
   }
   ring(P.x, P.y, 60, S.color, .35); sfx.shoot(true);
 }
+function openChest(){
+  const P = S.player, ready = UPGRADES.filter(evoReady);
+  burst(P.x, P.y, COL.amber, 40, 300); ring(P.x, P.y, 140, COL.amber, .6); sfx.win();
+  if (ready.length){
+    const u = ready[Math.floor(Math.random()*ready.length)];
+    u.apply(); S.upgrades[u.id] = 1;
+    S.banner = { txt:u.name.toUpperCase(), sub:'EVOLUTION UNLOCKED', life:2.4 };
+  } else {
+    S.level++; S.pending++;
+    S.banner = { txt:'FREE UPGRADE', sub:'NO EVOLUTION READY YET', life:1.8 };
+  }
+}
 function pulseNova(){
   const P = S.player, R = CONFIG.nova.radius + 15*(S.nova-1), dmg = CONFIG.nova.damage*S.dmgMul*(1 + .25*(S.nova-1));
   gridQuery(P.x, P.y, R + 50, e => { const dx = e.x-P.x, dy = e.y-P.y, d = Math.hypot(dx,dy) || 1; if (d < R + e.r) damageEnemy(e, dmg, dx/d, dy/d); });
@@ -863,6 +919,85 @@ function levelBlast(){
 
 /* ---------- boss AI ---------- */
 function updateBoss(e, dx, dy, d, dt){
+  (BOSS_AI[e.kind] || BOSS_AI.overseer)(e, dx, dy, d, dt);
+}
+const BOSS_AI = {
+  overseer: bossOverseer,
+  // Midway: a big square that throws rings of shots and splits off elite copies as it loses health
+  prime(e, dx, dy, d, dt){
+    const C = CONFIG.midBoss.kinds.prime;
+    e.rot += dt*.6; e.x += dx/d*e.speed*dt; e.y += dy/d*e.speed*dt;
+    e.r = Math.round(e.baseR*(.55 + .45*e.hp/e.maxHp));   // whole numbers so the sprite cache stays small
+    e.patT -= dt;
+    if (e.patT <= 0){ e.patT = C.slamEvery*(e.hp < e.maxHp/2 ? .7 : 1); const off = Math.random(); for (let i=0;i<C.slamCount;i++) eshot(e.x, e.y, (i+off)/C.slamCount*TAU, C.shotSpeed, C.shotDmg); ring(e.x, e.y, e.r*2, C.color, .4); }
+    while (e.phase < C.splitAt.length && e.hp/e.maxHp <= C.splitAt[e.phase]){
+      e.phase++;
+      for (let k=0;k<2;k++){
+        const a = rand(0, TAU), c = spawnEnemy('block', e.x + Math.cos(a)*e.r, e.y + Math.sin(a)*e.r, true);
+        const hp = C.childHp*(1 + CONFIG.difficulty.hpPerMinute*S.t/60);
+        Object.assign(c, { color:C.color, r:C.childR, hp, maxHp:hp, noHeal:true, xp:6, spawnT:0, kx:Math.cos(a)*300, ky:Math.sin(a)*300 });
+      }
+      burst(e.x, e.y, C.color, 30, 300); if (SET.shake) S.shake = Math.min(16, S.shake + 6);
+    }
+  },
+  // Midway: keeps its distance, launches swarms of darts and aimed volleys
+  hive(e, dx, dy, d, dt){
+    const C = CONFIG.midBoss.kinds.hive, ux = dx/d, uy = dy/d;
+    e.rot += dt*1.2;
+    let mx = ux, my = uy;
+    if (d < C.keepAway){ mx = -ux; my = -uy; } else if (d < C.keepAway*1.4){ mx = -uy; my = ux; }
+    e.x += mx*e.speed*dt; e.y += my*e.speed*dt;
+    e.patT -= dt; e.aux -= dt;
+    if (e.patT <= 0){
+      e.patT = C.swarmEvery*(e.hp < e.maxHp/2 ? .7 : 1);
+      const base = Math.atan2(dy, dx);
+      for (let i=0;i<C.swarmCount;i++){ const a = base + rand(-1.1, 1.1), c = spawnEnemy('dart', e.x, e.y); c.kx = Math.cos(a)*280; c.ky = Math.sin(a)*280; c.spawnT = 0; c.xp = 0; }
+      ring(e.x, e.y, e.r*1.8, C.color, .35);
+    }
+    if (e.aux <= 0){ e.aux = C.volleyEvery; const a = Math.atan2(dy, dx); for (let i=-2;i<=2;i++) eshot(e.x, e.y, a + i*.18, C.shotSpeed, C.shotDmg); }
+  },
+  // Midway: aims (warning line), dashes across the screen leaving a trail of lingering shots, rests
+  lancer(e, dx, dy, d, dt){
+    const C = CONFIG.midBoss.kinds.lancer, enraged = e.hp < e.maxHp/2;
+    if (e.charging > 0){
+      e.charging -= dt; e.x += e.cdx*C.dashSpeed*dt; e.y += e.cdy*C.dashSpeed*dt; e.rot = Math.atan2(e.cdy, e.cdx);
+      e.spiralCd -= dt; if (e.spiralCd <= 0){ e.spiralCd = C.trailEvery; eshot(e.x, e.y, 0, 0, C.trailDmg, C.trailLife, 6); }
+      if (e.charging <= 0){ if (enraged && e.phase === 0){ e.phase = 1; e.windup = C.aimTime*.6; } else { e.phase = 0; e.patT = C.restTime; } }
+      return;
+    }
+    if (e.windup > 0){ e.windup -= dt; e.rot = Math.atan2(dy, dx); if (e.windup <= 0){ e.cdx = dx/d; e.cdy = dy/d; e.charging = C.dashTime; sfx.charge(); } return; }
+    e.rot = Math.atan2(dy, dx); e.x += dx/d*e.speed*dt; e.y += dy/d*e.speed*dt;
+    e.patT -= dt; if (e.patT <= 0) e.windup = C.aimTime;
+  },
+  // Final (alternate): teleports, fires aimed bursts, cages you in mines and summons drone rings
+  conductor(e, dx, dy, d, dt){
+    const C = CONFIG.finalBosses.conductor, enraged = e.hp < e.maxHp/2, P = S.player;
+    e.rot += dt*(enraged ? 1.8 : .7);
+    if (e.blinkT > 0){
+      e.blinkT -= dt;
+      if (e.blinkT <= 0){
+        burst(e.x, e.y, C.color, 20, 260); e.x = e.bx; e.y = e.by; ring(e.x, e.y, e.r*2.5, C.color, .5);
+        const off = Math.random(); for (let i=0;i<12;i++) eshot(e.x, e.y, (i+off)/12*TAU, C.shotSpeed*.8, C.shotDmg);
+      }
+      return;
+    }
+    e.x += dx/d*e.speed*dt; e.y += dy/d*e.speed*dt;
+    if (e.spiral > 0){
+      e.spiral -= dt; e.spiralCd -= dt;
+      if (e.spiralCd <= 0){ e.spiralCd = enraged ? .22 : .3; const a = Math.atan2(dy, dx); for (let i=-2;i<=2;i++) eshot(e.x, e.y, a + i*.15, C.shotSpeed, C.shotDmg); }
+    }
+    e.patT -= dt;
+    if (e.patT <= 0){
+      e.patT = C.patternEvery*(enraged ? .7 : 1);
+      const p = e.pat++ % 4;
+      if (p === 0){ const a = rand(0, TAU); e.bx = P.x + Math.cos(a)*C.blinkDist; e.by = P.y + Math.sin(a)*C.blinkDist; e.blinkT = C.blinkTime; }
+      else if (p === 1) e.spiral = 1.2;
+      else if (p === 2){ const n = C.mineCount + (enraged ? 6 : 0), off = Math.random(); for (let i=0;i<n;i++){ const a = (i+off)/n*TAU; eshot(P.x + Math.cos(a)*C.mineRadius, P.y + Math.sin(a)*C.mineRadius, 0, 0, C.shotDmg, C.mineLife, 7); } ring(P.x, P.y, C.mineRadius, C.color, .5); }
+      else { const R = 260; for (let i=0;i<C.summonCount;i++){ const a = i/C.summonCount*TAU; spawnEnemy('drone', P.x + Math.cos(a)*R, P.y + Math.sin(a)*R); } }
+    }
+  },
+};
+function bossOverseer(e, dx, dy, d, dt){
   const B = CONFIG.boss, enraged = e.hp < e.maxHp/2;
   e.rot += dt*(enraged ? 2 : .8);
   if (e.charging > 0){ e.charging -= dt; e.x += e.cdx*B.chargeSpeed*dt; e.y += e.cdy*B.chargeSpeed*dt; burst(e.x, e.y, B.color, 1, 80); }
@@ -921,13 +1056,14 @@ function update(dt){
 
   // spawning
   const SP = CONFIG.spawn;
-  S.spawnAcc += (SP.base + SP.perMinute * S.t/60) * (S.bossPhase ? CONFIG.boss.spawnMul : 1) * dt;
+  S.spawnAcc += (SP.base + SP.perMinute * S.t/60) * (S.bossPhase ? CONFIG.boss.spawnMul : bossAlive(S.midBoss) ? CONFIG.midBoss.spawnMul : 1) * dt;
+  if (CONFIG.midBoss.enabled && !S.midSpawned && !S.bossPhase && S.t >= CONFIG.midBoss.at) spawnMidBoss();
   while (S.spawnAcc >= 1){ S.spawnAcc -= 1; if (S.enemies.length < SP.max) spawnEnemy(pickType()); }
   if (S.t >= S.nextBurst){
     S.nextBurst += SP.burstEvery; const R = spawnRadius()*.85;
     for (let i=0;i<SP.burstCount;i++){ const a = i/SP.burstCount*TAU; spawnEnemy('drone', P.x + Math.cos(a)*R, P.y + Math.sin(a)*R); }
   }
-  if (!S.bossPhase && S.t >= S.nextElite){ S.nextElite += SP.eliteEvery; spawnEnemy(S.t >= CONFIG.enemies.hexer.from ? 'hexer' : 'drone', undefined, undefined, true); }
+  if (!S.bossPhase && !bossAlive(S.midBoss) && S.t >= S.nextElite){ S.nextElite += SP.eliteEvery; spawnEnemy(S.t >= CONFIG.enemies.hexer.from ? 'hexer' : 'drone', undefined, undefined, true); }
 
   // enemies
   const far = spawnRadius()*2.2;
@@ -1029,7 +1165,7 @@ function update(dt){
   for (const s of S.eshots){
     s.x += s.vx*dt; s.y += s.vy*dt; s.life -= dt;
     if (s.life <= 0){ s.dead = true; continue; }
-    if ((s.x-P.x)**2 + (s.y-P.y)**2 < (P.r + 4)**2){ s.dead = true; hurt(s.dmg); if (S.state !== 'play') return; }
+    if ((s.x-P.x)**2 + (s.y-P.y)**2 < (P.r + (s.r || 5) - 1)**2){ s.dead = true; hurt(s.dmg); if (S.state !== 'play') return; }
   }
 
   // gems
@@ -1040,6 +1176,7 @@ function update(dt){
     if (d < P.r + 6){
       g.dead = true;
       if (g.kind === 'heal'){ P.hp = Math.min(P.maxHp, P.hp + g.v); burst(P.x, P.y, COL.heal, 12, 160); }
+      else if (g.kind === 'chest') openChest();
       else { addXp(g.v); sfx.gem(); }
     }
   }
@@ -1088,15 +1225,28 @@ function render(dt){
   for (const g of S.gems){ if (g.kind !== 'xp') continue; const s = g.v >= 5 ? 6 : 3.6, y = g.y + Math.sin(now*4+g.bob)*1.2; ctx.moveTo(g.x, y-s); ctx.lineTo(g.x+s*.7, y); ctx.lineTo(g.x, y+s); ctx.lineTo(g.x-s*.7, y); ctx.closePath(); }
   ctx.fillStyle = COL.amber; ctx.fill();
   for (const g of S.gems){ if (g.kind !== 'heal') continue; ctx.fillStyle = COL.heal; ctx.fillRect(g.x-7, g.y-2.5, 14, 5); ctx.fillRect(g.x-2.5, g.y-7, 5, 14); }
+  for (const g of S.gems){
+    if (g.kind !== 'chest') continue;
+    const sp = sprite('square', COL.amber, 11);
+    ctx.save(); ctx.translate(g.x, g.y + Math.sin(now*3)*2); ctx.rotate(now*.8); ctx.drawImage(sp.cv, -sp.h, -sp.h, sp.h*2, sp.h*2); ctx.restore();
+  }
   ctx.globalCompositeOperation = 'source-over';
 
-  // boss charge telegraph
-  const B = S.boss;
-  if (B && !B.dead && B.windup > 0){
-    const a = Math.atan2(P.y - B.y, P.x - B.x);
-    ctx.strokeStyle = `rgba(255,61,154,${.25 + .5*Math.abs(Math.sin(now*20))})`; ctx.lineWidth = B.r*1.4; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.lineTo(B.x + Math.cos(a)*600, B.y + Math.sin(a)*600); ctx.stroke();
+  // boss telegraphs: charge lines and teleport targets
+  for (const bb of [S.boss, S.midBoss]){
+    if (!bossAlive(bb)) continue;
+    const pulse = .25 + .5*Math.abs(Math.sin(now*20));
+    if (bb.windup > 0){
+      const a = Math.atan2(P.y - bb.y, P.x - bb.x);
+      ctx.strokeStyle = `rgba(255,61,154,${pulse})`; ctx.lineWidth = bb.r*1.4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(bb.x, bb.y); ctx.lineTo(bb.x + Math.cos(a)*700, bb.y + Math.sin(a)*700); ctx.stroke();
+    }
+    if (bb.blinkT > 0){
+      ctx.strokeStyle = `rgba(169,139,255,${pulse})`; ctx.lineWidth = 3; ctx.setLineDash([8,8]);
+      ctx.beginPath(); ctx.arc(bb.bx, bb.by, bb.r, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    }
   }
+  const B = bossAlive(S.boss) ? S.boss : bossAlive(S.midBoss) ? S.midBoss : null;
 
   // enemies
   for (const e of S.enemies){
@@ -1121,7 +1271,7 @@ function render(dt){
   ctx.strokeStyle = 'rgba(255,194,61,.6)'; ctx.lineWidth = 10; ctx.stroke();
   ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.stroke();
   // enemy shots
-  ctx.beginPath(); for (const s of S.eshots){ ctx.moveTo(s.x + 5, s.y); ctx.arc(s.x, s.y, 5, 0, TAU); }
+  ctx.beginPath(); for (const s of S.eshots){ const r = (s.r || 5)*(s.vx || s.vy ? 1 : .85 + .15*Math.sin(now*8 + s.x)); ctx.moveTo(s.x + r, s.y); ctx.arc(s.x, s.y, r, 0, TAU); }
   ctx.fillStyle = 'rgba(255,93,115,.55)'; ctx.fill();
   ctx.beginPath(); for (const s of S.eshots){ ctx.moveTo(s.x + 2, s.y); ctx.arc(s.x, s.y, 2, 0, TAU); }
   ctx.fillStyle = '#ffffff'; ctx.fill();
@@ -1197,9 +1347,9 @@ function render(dt){
   if (B && !B.dead){
     const w = Math.min(380, W*.42), x = (W - w)/2, y = 72;
     ctx.fillStyle = 'rgba(7,6,15,.7)'; ctx.fillRect(x-2, y-2, w+4, 10);
-    ctx.fillStyle = B.hp < B.maxHp/2 ? '#ffffff' : COL.pink; ctx.fillRect(x, y, w*Math.max(0, B.hp/B.maxHp), 6);
+    ctx.fillStyle = B.hp < B.maxHp/2 ? '#ffffff' : B.color; ctx.fillRect(x, y, w*Math.max(0, B.hp/B.maxHp), 6);
     ctx.font = '700 10px "Chakra Petch", ui-monospace, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff';
-    ctx.fillText(CONFIG.boss.name + (B.hp < B.maxHp/2 ? ' · ENRAGED' : ''), W/2, y + 22);
+    ctx.fillText(bossDef(B).name + (B.hp < B.maxHp/2 ? ' · ENRAGED' : ''), W/2, y + 22);
   }
   // banner
   if (S.banner){
@@ -1294,7 +1444,7 @@ function saveRun(){
   if (!S || !['play','paused','levelup'].includes(S.state)) return;
   try {
     const o = { ...S, v:1, bullets:[], eshots:[], parts:[], texts:[], rings:[], ripples:[], trails:[], banner:null,
-      bossIdx:S.boss ? S.enemies.indexOf(S.boss) : -1, boss:null, shake:0, hitstop:0, flash:0, state:'paused' };
+      bossIdx:S.boss ? S.enemies.indexOf(S.boss) : -1, boss:null, midIdx:S.midBoss ? S.enemies.indexOf(S.midBoss) : -1, midBoss:null, shake:0, hitstop:0, flash:0, state:'paused' };
     localStorage.setItem(RUN_KEY, JSON.stringify(o));
   } catch {}
 }
@@ -1305,6 +1455,8 @@ function continueRun(){
   audioInit(); goFullscreen();
   newGame(); S = { ...S, ...o };   // fields added after this run was saved keep their fresh defaults
   S.boss = o.bossIdx >= 0 ? S.enemies[o.bossIdx] || null : null; delete S.bossIdx;
+  S.midBoss = o.midIdx >= 0 ? S.enemies[o.midIdx] || null : null; delete S.midIdx;
+  if (S.boss && S.boss.final === undefined) S.boss.final = true;   // runs saved before boss variety
   S.state = 'paused'; hudCache = {}; resetJoy(); autosaveT = 0;
   buildToggles(); show('paused');
 }
@@ -1511,10 +1663,19 @@ function adjust(row, dir){
   saveDebug(); keepFocus(buildDebug);
 }
 function dbgNote(t){ $('dbgNote').textContent = t; }
+let dbgMid = 0; const midKinds = () => Object.keys(CONFIG.midBoss.kinds);
 const CHEATS = [
   [() => '+1 LEVEL',    () => { S.level++; S.pending++; S.xp = 0; S.xpNext = Math.round(S.xpNext*CONFIG.xp.growth + CONFIG.xp.add); return 'Level-up waiting when you resume'; }],
   [() => 'SPAWN ELITE', () => { spawnEnemy(S.t >= CONFIG.enemies.hexer.from ? 'hexer' : 'drone', undefined, undefined, true); return 'Elite spawned'; }],
-  [() => 'SPAWN BOSS',  () => { if (S.bossPhase) return 'Boss already here'; S.timeLeft = .01; return 'Boss arrives when you resume'; }],
+  [() => 'MIDWAY: ' + CONFIG.midBoss.kinds[midKinds()[dbgMid % midKinds().length]].name, () => {
+    if (bossAlive(S.midBoss)) return 'A midway boss is already here';
+    const k = midKinds()[dbgMid % midKinds().length]; dbgMid++; spawnMidBoss(k); return CONFIG.midBoss.kinds[k].name + ' spawned';
+  }],
+  [() => 'FINAL: ' + (S.finalKind === 'conductor' ? 'CONDUCTOR' : 'OVERSEER'), () => {
+    if (S.bossPhase) return 'Final boss already here';
+    const pick = CONFIG.finalBosses.pick; S.finalKind = pick[(pick.indexOf(S.finalKind) + 1) % pick.length]; return 'Final boss set to ' + S.finalKind;
+  }],
+  [() => 'SPAWN FINAL BOSS',  () => { if (S.bossPhase) return 'Boss already here'; S.timeLeft = .01; return 'Final boss arrives when you resume'; }],
   [() => 'SKIP 1 MIN',  () => { if (S.bossPhase) return 'Timer already done'; S.timeLeft = Math.max(.01, S.timeLeft - 60); S.t += 60; return 'Skipped ahead 1 minute'; }],
   [() => 'FULL HP',     () => { S.player.hp = S.player.maxHp; return 'HP refilled'; }],
   [() => 'KILL ALL',    () => { let n = 0; for (const e of S.enemies) if (!e.boss && !e.dead){ killEnemy(e); n++; } compact(S.enemies); return `Killed ${n} enemies`; }],

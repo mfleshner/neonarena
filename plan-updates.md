@@ -42,7 +42,8 @@ Maxing two related upgrades unlocks a powered-up version on the next level-up.
 - Level-up cards show a small hint when an upgrade is part of an evolution you're close to
 - Evolutions replace their two parent upgrades in the level-up pool
 
-## 4. More bosses and a midway boss
+## 4. More bosses and a midway boss ✅ done
+(Final bosses: Overseer or Conductor, random per run. Debug panel has MIDWAY (cycles the three), FINAL (switches which final boss) and SPAWN FINAL BOSS.)
 - Midway boss at 5:00, while the timer keeps running, so it's a fight in the middle of the swarm
 - Three midway bosses, one picked at random each run:
   - **Splitter Prime**: a huge square that breaks into smaller copies as it takes damage
