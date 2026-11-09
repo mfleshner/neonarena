@@ -5,6 +5,7 @@ A landscape phone survivor shooter in a single HTML file, in the spirit of 20 Mi
 - Left thumb: floating joystick to move
 - Tap the right side: fire one auto-aimed shot
 - Stop firing for a moment: reload
+- PC: WASD or arrows to move, mouse to aim, left click (or Space) to fire, Esc to pause
 - Survive 10:00, then destroy the Overseer
 
 ## Play
