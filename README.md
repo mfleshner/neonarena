@@ -5,7 +5,7 @@ A landscape phone survivor shooter in a single HTML file, in the spirit of 20 Mi
 - Left thumb: floating joystick to move
 - Tap the right side: fire one auto-aimed shot
 - Stop firing for a moment: reload
-- Speed reload: tap while the reload bar is inside the white zone to reload instantly. Miss on an empty mag and you fumble (slower reload)
+- Speed reload: tap while the reload bar is inside the white zone to reload instantly, and that whole magazine hits 25% harder. Miss on an empty mag and you fumble (slower reload)
 - PC: WASD or arrows to move, mouse to aim, left click (or Space) to fire, Esc to pause
 - Controller: left stick or D-pad to move, right stick to aim, RT / RB / LT / A to fire, Start to pause. D-pad, A and B work in every menu.
 - Options → Aim: by device (auto on touch, manual with mouse or controller), always auto, or always manual
