@@ -50,6 +50,7 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 - Keep `[hidden]{display:none!important}` in the CSS. `.screen` sets `display:grid`, which otherwise overrides `hidden` and shows every menu at once.
 - Phone performance: draw batched paths, reuse cached sprites, keep particle caps (`parts` ≤ 520, `eshots` ≤ 400, `rings` ≤ 80).
 - Wrap all localStorage access in try/catch.
+- In-game HUD buttons must use `hudButton(el, fn)` (acts on pointerdown), not `click`: Android sends no click for a tap made while the joystick thumb is down.
 - Landscape phones are short (~390 CSS px tall): keep menus compact, test card rows at ~850×390.
 - New screens: add the element with `class="screen" hidden`, add its id to `SCREENS`, decide in `show()` whether the HUD hides, and add a B-button target in `navBack()`.
 
