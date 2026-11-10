@@ -245,7 +245,7 @@ body.portrait #rotate{display:grid}
 /* =====================================================================
    NEON ARENA — tweak everything here
    ===================================================================== */
-const BUILD = 22;   // bump by 1 on every push that changes this file, so the menu shows which version is running
+const BUILD = 23;   // bump by 1 on every push that changes this file, so the menu shows which version is running
 
 const CONFIG = {
   runSeconds: 600,              // survive this long, then the boss arrives
@@ -312,6 +312,9 @@ const CONFIG = {
   },
   // Midway boss: one of `kinds` at random, `at` seconds into the run. Killing it drops a heal and an evolution chest.
   // Overload: screen-clearing charge earned by kills. Destroys everything on screen; bosses take a chunk of max HP instead.
+  // Speed reload: a highlighted zone appears on the reload bar. Tap inside it to finish the reload instantly.
+  // Tapping outside it on an empty mag fumbles: the zone disappears and the reload takes missPenalty longer.
+  speedReload: { enabled: true, zoneMin: 0.35, zoneMax: 0.65, zoneSize: 0.2, minZoneSeconds: 0.13, missPenalty: 0.35 },
   overload: { startCharges: 1, killsPerCharge: 1000, maxCharges: 3, bossDamage: 0.1, cooldown: 1.5 },
   midBoss: {
     enabled: true, at: 300, spawnMul: 0.6, heal: 40,
@@ -496,6 +499,8 @@ const sfx = {
   heartbeat(){ tone(70, .12, 'sine', .22, .6); tone(62, .14, 'sine', .18, .6, .16); },
   boom(){ noise(.25, .09, 'lowpass', 2500, 0, 150); tone(90, .2, 'sine', .12, .5); },
   buy(){ tone(880, .08, 'square', .03, 1.5); tone(1320, .1, 'square', .03, 1, .08); },
+  perfect(){ tone(1568, .09, 'triangle', .05, 1); tone(2093, .16, 'triangle', .045, 1, .05); noise(.03, .06, 'bandpass', 2600, 0, 0, 5); },
+  fumble(){ noise(.06, .08, 'bandpass', 700, 0, 0, 4); tone(120, .12, 'square', .04, .7); },
   ovReady(){ tone(660, .1, 'triangle', .04, 1.5); tone(990, .14, 'triangle', .04, 1.3, .08); },
   overload(){ noise(.25, .1, 'bandpass', 400, 0, 6000, 2); noise(1.1, .16, 'lowpass', 4000, .1, 60); tone(1600, .5, 'sawtooth', .05, .05, .05); tone(48, 1, 'sine', .3, .5, .08); },
   death(){ noise(1.2, .14, 'lowpass', 3000, 0, 80); tone(220, 1, 'sawtooth', .06, .2); tone(55, .9, 'sine', .2, .6); },
@@ -632,7 +637,7 @@ function newGame(){
     state:'menu', t:0, timeLeft:CONFIG.runSeconds, kills:0, level:1, xp:0, xpNext:CONFIG.xp.first, pending:0,
     color:ship.color, ship:SAVE.ship,
     player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
-    gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, idle:0, cooldown:0, queued:false, aim:0,
+    gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, reloadLen:1, rlZone:0, rlSize:0, rlMissed:true, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
     orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, ovCharges:CONFIG.overload.startCharges, ovKills:0, ovCd:0, wave:null,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
@@ -767,12 +772,43 @@ function keepFocus(fn){   // rebuild a button list without losing the controller
 /* ---------- gun ---------- */
 function tap(){
   if (S.reloading){
+    if (trySpeedReload()) return;
     if (S.ammo > 0) S.reloading = false;          // tapping interrupts a partial-mag reload
     else { sfx.empty(); return; }
   }
   if (S.ammo <= 0){ sfx.empty(); return; }
   if (S.cooldown > 0){ S.queued = true; return; }
   fire();
+}
+const reloadProg = () => Math.max(0, 1 - S.reloadT/(S.reloadLen || S.gun.reloadTime));
+function startReload(){
+  const G = S.gun, SR = CONFIG.speedReload;
+  S.reloading = true; S.reloadT = S.reloadLen = G.reloadTime; S.queued = false;
+  S.rlSize = Math.min(.5, Math.max(SR.zoneSize, SR.minZoneSeconds/G.reloadTime));
+  S.rlZone = Math.min(rand(SR.zoneMin, SR.zoneMax), .97 - S.rlSize);
+  S.rlMissed = !SR.enabled;
+  sfx.reloadStart();
+}
+function finishReload(perfect){
+  const P = S.player;
+  S.reloading = false; S.ammo = S.gun.magSize; S.freshReady = true;
+  if (perfect){
+    S.texts.push({ x:P.x, y:P.y - 26, txt:'PERFECT', crit:true, life:.8, dead:false });
+    ring(P.x, P.y, P.r + 22, '#ffffff', .3); sfx.perfect(); buzz(15);
+  } else sfx.reload();
+  if (S.evo.overflow) overflowRing();
+}
+// Returns true when the tap was used by the speed reload (hit or fumble).
+function trySpeedReload(){
+  if (S.rlMissed) return false;
+  const p = reloadProg();
+  if (p >= S.rlZone && p <= S.rlZone + S.rlSize){ finishReload(true); return true; }
+  if (S.ammo > 0) return false;                   // partial mag: a normal tap still cancels the reload and fires
+  const pen = CONFIG.speedReload.missPenalty, P = S.player;
+  S.rlMissed = true; S.reloadT += pen; S.reloadLen += pen;
+  S.texts.push({ x:P.x, y:P.y - 26, txt:'FUMBLE', crit:false, life:.7, dead:false });
+  sfx.fumble();
+  return true;
 }
 function nearestEnemy(range){
   const P = S.player; let best = null, bd = range*range;
@@ -1100,9 +1136,9 @@ function update(dt){
   S.cooldown -= dt; S.idle += dt;
   if (S.reloading){
     S.reloadT -= dt;
-    if (S.reloadT <= 0){ S.reloading = false; S.ammo = G.magSize; S.freshReady = true; sfx.reload(); if (S.evo.overflow) overflowRing(); }
+    if (S.reloadT <= 0) finishReload(false);
   } else if (S.ammo < G.magSize && (S.ammo === 0 ? S.cooldown <= 0 : S.idle >= G.reloadDelay)){
-    S.reloading = true; S.reloadT = G.reloadTime; S.queued = false; sfx.reloadStart();
+    startReload();
   }
   if (S.queued && S.cooldown <= 0 && !S.reloading && S.ammo > 0) fire();
 
@@ -1364,8 +1400,14 @@ function render(dt){
     const G = S.gun, R = P.r + 10, span = Math.min(2.6, .32*G.magSize), start = Math.PI/2 + span/2;
     ctx.lineWidth = 3; ctx.lineCap = 'butt';
     if (S.reloading){
-      const prog = 1 - S.reloadT/G.reloadTime;
+      const prog = reloadProg();
       ctx.strokeStyle = 'rgba(255,194,61,.22)'; ctx.beginPath(); ctx.arc(P.x, P.y, R, start - span, start); ctx.stroke();
+      if (!S.rlMissed){   // speed reload zone: brighter while the fill is inside it
+        const inZone = prog >= S.rlZone && prog <= S.rlZone + S.rlSize;
+        ctx.lineWidth = inZone ? 7 : 5; ctx.strokeStyle = inZone ? '#ffffff' : 'rgba(255,255,255,.55)';
+        ctx.beginPath(); ctx.arc(P.x, P.y, R, start - span*(S.rlZone + S.rlSize), start - span*S.rlZone); ctx.stroke();
+        ctx.lineWidth = 3;
+      }
       ctx.strokeStyle = COL.amber; ctx.beginPath(); ctx.arc(P.x, P.y, R, start - span*prog, start); ctx.stroke();
     } else {
       const seg = span / G.magSize, gap = Math.min(.08, seg*.3);
@@ -1438,7 +1480,11 @@ function render(dt){
     ctx.beginPath(); ctx.arc(mx, my, 9, 0, TAU);
     for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ ctx.moveTo(mx + dx*13, my + dy*13); ctx.lineTo(mx + dx*19, my + dy*19); }
     ctx.stroke();
-    if (S.reloading){ ctx.beginPath(); ctx.arc(mx, my, 13, -Math.PI/2, -Math.PI/2 + TAU*(1 - S.reloadT/S.gun.reloadTime)); ctx.stroke(); }
+    if (S.reloading){
+      const p = reloadProg(), a0 = -Math.PI/2;
+      if (!S.rlMissed){ ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(mx, my, 13, a0 + TAU*S.rlZone, a0 + TAU*(S.rlZone + S.rlSize)); ctx.stroke(); ctx.restore(); }
+      ctx.beginPath(); ctx.arc(mx, my, 13, a0, a0 + TAU*p); ctx.stroke();
+    }
     ctx.fillStyle = '#ffffff'; ctx.fillRect(mx - 1, my - 1, 2, 2);
   }
   // first-seconds hints
@@ -1693,6 +1739,7 @@ const DEBUG_ROWS = [
   { label:'Tap cooldown',     path:'gun.tapCooldown',          step:.01, min:.02, live:'gun' },
   { label:'Reload delay',     path:'gun.reloadDelay',          step:.05, min:0,   live:'gun' },
   { label:'Reload time',      path:'gun.reloadTime',           step:.05, min:.1,  live:'gun' },
+  { label:'Speed reload zone', path:'speedReload.zoneSize',    step:.02, min:.04 },
   { label:'Damage',           path:'gun.damage',               step:1,   min:1,   live:'gun' },
   { label:'Mag size',         path:'gun.magSize',              step:1,   min:1,   live:'gun' },
   { label:'Move speed',       path:'player.speed',             step:5,   min:40,  live:'player' },

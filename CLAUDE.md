@@ -14,13 +14,14 @@ Hobby game for the repo owner (Matt). A landscape phone survivor shooter in the 
 ## Design decisions (keep unless Matt changes them)
 - **Tap to fire**: each tap / click / button press fires one shot. Not hold-to-fire.
 - **Magazine + idle reload**: reload starts after `reloadDelay` seconds of not firing, or right away at 0 ammo. Tapping during a reload cancels it if ammo > 0.
+- **Speed reload**: each reload shows a highlighted zone on the reload arc (`CONFIG.speedReload`). Tapping inside it finishes the reload instantly ("PERFECT"). Tapping outside it on an empty mag fumbles: zone gone, reload gets `missPenalty` longer. With ammo left, a tap outside the zone still cancels the reload and fires. Code: `startReload()`, `finishReload(perfect)`, `trySpeedReload()`, `reloadProg()`.
 - **Aim**: setting `SET.aim` = `device` (default: auto-aim on touch, manual with mouse/controller) | `auto` | `manual`. Auto-aim targets the nearest enemy with a small lead.
 - **Infinite map**: camera keeps the player centered; enemies spawn on a ring around the view and far ones are recycled back to the ring.
 - **Run**: a midway boss at 5:00; survive `runSeconds` (600), then a final boss spawns; killing it wins.
 - Every tunable number lives in `CONFIG` at the top of the script. Add new numbers there, not inline.
 
 ## Script map (in order)
-- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, evolutions, overload, spawn, difficulty, elite, boss, xp, enemies, controls, audio
+- `CONFIG` — all tuning: gun, player, ships, perks, shards, orbital, nova, evolutions, speedReload, overload, spawn, difficulty, elite, boss, xp, enemies, controls, audio
 - `UPGRADES` — in-run level-up choices (`id`, `name`, `desc`, `max`, `apply()` mutates `S`)
 - Evolutions: `UPGRADES` entries with `evo:true, needs:[a,b]`; offered (up to 2, shown first, gold card) once both parents are maxed (`evoReady`). Flags live in `S.evo` (chain, rail, exec, overflow, blade, jugg); numbers in `CONFIG.evolutions`. Helpers: `explode()`, `overflowRing()`, `orbRadius()`, rail `S.trails`. Level-up cards show an "Evolves into…" hint via `evoHint()`.
 - Canvas setup: `resize()` sets `W`, `H`, `DPR`, `SC` (world→screen scale = H / view.height)
