@@ -47,6 +47,8 @@ body{font-family:var(--ui);-webkit-user-select:none;user-select:none;-webkit-tou
 .lvrow{display:flex;align-items:center;gap:8px}
 .lvrow b{font-size:12px;letter-spacing:.08em;color:var(--amber);min-width:38px;font-variant-numeric:tabular-nums}
 .lvrow .bar{flex:1;height:6px}
+.pus{display:flex;gap:6px;flex-wrap:wrap;min-height:0}
+.pus span{font-size:10px;font-weight:700;letter-spacing:.12em;padding:2px 6px;border:1px solid currentColor;border-radius:3px;background:rgba(7,6,15,.6);font-variant-numeric:tabular-nums}
 #xpFill{background:var(--amber);box-shadow:0 0 8px var(--amber);width:0}
 .clock{text-align:center;display:flex;flex-direction:column;align-items:center;line-height:1}
 .clock .lbl{font-size:9px;letter-spacing:.3em;color:var(--dim)}
@@ -144,6 +146,7 @@ body.portrait #rotate{display:grid}
     <div class="stats">
       <div class="bar"><i id="hpFill"></i><span id="hpText">100</span></div>
       <div class="lvrow"><b id="lvText">LV 1</b><div class="bar"><i id="xpFill"></i></div></div>
+      <div class="pus" id="pus"></div>
     </div>
     <div class="clock"><span class="lbl" id="clockLbl">SURVIVE</span><b id="timer">10:00</b><span class="kills" id="kills">0 KILLS</span></div>
     <div class="btns"><button id="muteBtn" type="button">SFX ON</button><button id="pauseBtn" type="button" aria-label="Pause">II</button></div>
@@ -246,7 +249,7 @@ body.portrait #rotate{display:grid}
 /* =====================================================================
    NEON ARENA — tweak everything here
    ===================================================================== */
-const BUILD = 25;   // bump by 1 on every push that changes this file, so the menu shows which version is running
+const BUILD = 26;   // bump by 1 on every push that changes this file, so the menu shows which version is running
 
 const CONFIG = {
   runSeconds: 600,              // survive this long, then the boss arrives
@@ -317,6 +320,17 @@ const CONFIG = {
   // Tapping outside it on an empty mag fumbles: the zone disappears and the reload takes missPenalty longer.
   speedReload: { enabled: true, zoneMin: 0.35, zoneMax: 0.65, zoneSize: 0.2, minZoneSeconds: 0.13, missPenalty: 0.35,
                  perfectDamage: 1.25 },   // damage multiplier for every shot in a magazine loaded by a perfect reload
+  // Temporary power-up drops. Regular kills drop one at dropChance; elites always drop one (plus their heal).
+  // Drops vanish after `life` seconds (they blink for the last 4) and only `maxOnGround` can exist at once.
+  powerups: {
+    dropChance: 0.006, eliteDrop: true, life: 20, maxOnGround: 3,
+    types: {
+      shield:     { name:'SHIELD',     color:'#e9fbff', icon:'S',  weight:3, seconds:10 },   // can't take damage
+      overdrive:  { name:'OVERDRIVE',  color:'#ff4dff', icon:'2X', weight:3, shots:30, damageMul:2 },
+      magnet:     { name:'MAGNET',     color:'#c6ff4d', icon:'M',  weight:2 },               // pulls in every XP gem
+      bottomless: { name:'BOTTOMLESS', color:'#5d9bff', icon:'∞',  weight:2, seconds:8 },    // shots use no ammo
+    },
+  },
   // Nanites upgrade: HP per second per level, paused for a moment after you take damage
   nanites: { perLevel: 0.4, pauseAfterHit: 3 },
   overload: { startCharges: 1, killsPerCharge: 1000, maxCharges: 3, bossDamage: 0.1, cooldown: 1.5 },
@@ -505,6 +519,8 @@ const sfx = {
   buy(){ tone(880, .08, 'square', .03, 1.5); tone(1320, .1, 'square', .03, 1, .08); },
   perfect(){ tone(1568, .09, 'triangle', .05, 1); tone(2093, .16, 'triangle', .045, 1, .05); noise(.03, .06, 'bandpass', 2600, 0, 0, 5); },
   fumble(){ noise(.06, .08, 'bandpass', 700, 0, 0, 4); tone(120, .12, 'square', .04, .7); },
+  powerup(){ [784,1047,1319].forEach((f,i) => tone(f, .12, 'square', .03, 1.02, i*.05)); noise(.2, .04, 'highpass', 3000, 0, 8000); },
+  bubble(){ tone(900, .06, 'sine', .04, 1.8); },
   ovReady(){ tone(660, .1, 'triangle', .04, 1.5); tone(990, .14, 'triangle', .04, 1.3, .08); },
   overload(){ noise(.25, .1, 'bandpass', 400, 0, 6000, 2); noise(1.1, .16, 'lowpass', 4000, .1, 60); tone(1600, .5, 'sawtooth', .05, .05, .05); tone(48, 1, 'sine', .3, .5, .08); },
   death(){ noise(1.2, .14, 'lowpass', 3000, 0, 80); tone(220, 1, 'sawtooth', .06, .2); tone(55, .9, 'sine', .2, .6); },
@@ -643,7 +659,7 @@ function newGame(){
     player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
     gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, reloadLen:1, rlZone:0, rlSize:0, rlMissed:true, boosted:false, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
-    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, ovCharges:CONFIG.overload.startCharges, ovKills:0, ovCd:0, wave:null,
+    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, pu:{ shield:0, overdrive:0, bottomless:0 }, ovCharges:CONFIG.overload.startCharges, ovKills:0, ovCd:0, wave:null,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
     shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, midBoss:null, midSpawned:false,
@@ -785,6 +801,7 @@ function tap(){
   fire();
 }
 const boostMul = () => S.boosted ? CONFIG.speedReload.perfectDamage : 1;
+const odMul = () => S.pu.overdrive > 0 ? CONFIG.powerups.types.overdrive.damageMul : 1;
 const reloadProg = () => Math.max(0, 1 - S.reloadT/(S.reloadLen || S.gun.reloadTime));
 function startReload(){
   const G = S.gun, SR = CONFIG.speedReload;
@@ -841,12 +858,14 @@ function fire(){
   for (let i=0;i<n;i++){
     const ang = a + (i - (n-1)/2) * G.spread;
     S.bullets.push({ x:P.x + Math.cos(ang)*P.r, y:P.y + Math.sin(ang)*P.r, vx:Math.cos(ang)*G.bulletSpeed, vy:Math.sin(ang)*G.bulletSpeed,
-      life, dmg:G.damage*S.dmgMul*mul*(S.evo.rail ? CONFIG.evolutions.rail.damageMul : 1)*boostMul(), boost:S.boosted, pierce:S.evo.rail ? 999 : G.pierce, bounce:G.bounce,
+      life, dmg:G.damage*S.dmgMul*mul*(S.evo.rail ? CONFIG.evolutions.rail.damageMul : 1)*boostMul()*odMul(), boost:S.boosted, od:S.pu.overdrive > 0, pierce:S.evo.rail ? 999 : G.pierce, bounce:G.bounce,
       big:last, exec:last && S.evo.exec, rail:!!S.evo.rail, trailT:0, hit:new Set(), dead:false });
   }
   for (let i=0;i<(last ? 14 : 5);i++) addPart(P.x + Math.cos(a)*P.r, P.y + Math.sin(a)*P.r, a + rand(-.5,.5), rand(80,last ? 320 : 220), .18, last ? COL.amber : S.color, 2);
   if (last && SET.shake) S.shake = Math.min(16, S.shake + 4);
-  S.ammo--; S.cooldown = G.tapCooldown; S.idle = 0; S.queued = false;
+  if (S.pu.bottomless <= 0) S.ammo--;
+  if (S.pu.overdrive > 0) S.pu.overdrive--;
+  S.cooldown = G.tapCooldown; S.idle = 0; S.queued = false;
   sfx.shoot(last);
 }
 
@@ -914,6 +933,10 @@ function killEnemy(e){
   burst(e.x, e.y, e.elite ? COL.amber : e.color, e.boss ? 120 : e.elite ? 40 : 10, e.boss ? 500 : e.elite ? 320 : 200);
   ring(e.x, e.y, e.r*2.4, e.elite ? COL.amber : e.color, e.elite ? .5 : .28);
   if (e.xp > 0) dropGem(e.x, e.y, e.xp, 'xp');
+  if (!e.boss){
+    if (e.elite && !e.noHeal && CONFIG.powerups.eliteDrop) dropPowerup(e.x - 14, e.y);
+    else if (!e.elite && Math.random() < CONFIG.powerups.dropChance) dropPowerup(e.x, e.y);
+  }
   if (e.elite && !e.boss && !e.noHeal){ dropGem(e.x + 12, e.y, 30, 'heal'); if (SET.shake) S.shake = Math.min(16, S.shake + 6); S.hitstop = .06; }
   for (let i=0;i<e.splits;i++){ const a = i/e.splits*TAU, c = spawnEnemy(e.splitInto, e.x + Math.cos(a)*8, e.y + Math.sin(a)*8); c.kx = Math.cos(a)*160; c.ky = Math.sin(a)*160; c.spawnT = 0; }
   sfx.kill(e);
@@ -926,12 +949,32 @@ function killEnemy(e){
     S.banner = { txt:'BOSS DOWN', sub:'GRAB THE CHEST', life:2 };
   }
 }
+function dropPowerup(x, y, type){
+  const PU = CONFIG.powerups;
+  if (!type){
+    if (S.gems.filter(g => g.kind === 'pu').length >= PU.maxOnGround) return;
+    const list = Object.entries(PU.types); let r = Math.random()*list.reduce((a, [, t]) => a + t.weight, 0);
+    type = list.find(([, t]) => (r -= t.weight) <= 0)?.[0] || list[0][0];
+  }
+  S.gems.push({ x, y, v:0, kind:'pu', pu:type, life:PU.life, mag:false, dead:false, bob:rand(0,6) });
+}
+function collectPowerup(type){
+  const T = CONFIG.powerups.types[type], P = S.player;
+  if (!T) return;
+  if (type === 'shield') S.pu.shield = T.seconds;
+  else if (type === 'overdrive') S.pu.overdrive += T.shots;
+  else if (type === 'bottomless'){ S.pu.bottomless = T.seconds; S.ammo = S.gun.magSize; S.reloading = false; }
+  else if (type === 'magnet') for (const g of S.gems) if (g.kind === 'xp') g.mag = true;
+  S.texts.push({ x:P.x, y:P.y - 30, txt:T.name, crit:true, life:1.1, dead:false });
+  ring(P.x, P.y, 70, T.color, .45); burst(P.x, P.y, T.color, 18, 220); sfx.powerup(); buzz(20);
+}
 function dropGem(x,y,v,kind){
   if (kind === 'xp' && S.gems.length > 400){ addXp(v); return; }
   S.gems.push({ x, y, v, kind, mag:false, dead:false, bob:rand(0,6) });
 }
 function hurt(dmg){
   const P = S.player; if (P.invuln > 0 || S.state !== 'play' || S.god) return;
+  if (S.pu.shield > 0){ if (allow('bubble', 1, 150)) sfx.bubble(); return; }
   P.hp -= dmg; P.invuln = CONFIG.player.invulnTime; S.lastHurt = S.t;
   const J = CONFIG.evolutions.jugg;
   if (S.evo.jugg && P.hp > 0 && P.hp/P.maxHp < .3 && S.juggCd <= 0){
@@ -1135,6 +1178,7 @@ function update(dt){
   }
   P.invuln = Math.max(0, P.invuln - dt);
   S.juggCd = Math.max(0, S.juggCd - dt); S.shieldT = Math.max(0, S.shieldT - dt); S.ovCd = Math.max(0, S.ovCd - dt);
+  S.pu.shield = Math.max(0, S.pu.shield - dt); S.pu.bottomless = Math.max(0, S.pu.bottomless - dt);
   if (P.regen && S.t - (S.lastHurt ?? -99) >= CONFIG.nanites.pauseAfterHit) P.hp = Math.min(P.maxHp, P.hp + P.regen*dt);
 
   // gun + reload
@@ -1142,7 +1186,7 @@ function update(dt){
   if (S.reloading){
     S.reloadT -= dt;
     if (S.reloadT <= 0) finishReload(false);
-  } else if (S.ammo < G.magSize && (S.ammo === 0 ? S.cooldown <= 0 : S.idle >= G.reloadDelay)){
+  } else if (S.pu.bottomless <= 0 && S.ammo < G.magSize && (S.ammo === 0 ? S.cooldown <= 0 : S.idle >= G.reloadDelay)){
     startReload();
   }
   if (S.queued && S.cooldown <= 0 && !S.reloading && S.ammo > 0) fire();
@@ -1263,6 +1307,7 @@ function update(dt){
 
   // gems
   for (const g of S.gems){
+    if (g.kind === 'pu'){ g.life -= dt; if (g.life <= 0){ g.dead = true; continue; } }
     const dx = P.x - g.x, dy = P.y - g.y, d = Math.hypot(dx,dy) || 1;
     if (!g.mag && d < P.pickup) g.mag = true;
     if (g.mag){ const sp = CONFIG.player.magnetSpeed * dt; g.x += dx/d*Math.min(sp,d); g.y += dy/d*Math.min(sp,d); }
@@ -1270,6 +1315,7 @@ function update(dt){
       g.dead = true;
       if (g.kind === 'heal'){ P.hp = Math.min(P.maxHp, P.hp + g.v); burst(P.x, P.y, COL.heal, 12, 160); }
       else if (g.kind === 'chest') openChest();
+      else if (g.kind === 'pu') collectPowerup(g.pu);
       else { addXp(g.v); sfx.gem(); }
     }
   }
@@ -1319,6 +1365,14 @@ function render(dt){
   for (const g of S.gems){ if (g.kind !== 'xp') continue; const s = g.v >= 5 ? 6 : 3.6, y = g.y + Math.sin(now*4+g.bob)*1.2; ctx.moveTo(g.x, y-s); ctx.lineTo(g.x+s*.7, y); ctx.lineTo(g.x, y+s); ctx.lineTo(g.x-s*.7, y); ctx.closePath(); }
   ctx.fillStyle = COL.amber; ctx.fill();
   for (const g of S.gems){ if (g.kind !== 'heal') continue; ctx.fillStyle = COL.heal; ctx.fillRect(g.x-7, g.y-2.5, 14, 5); ctx.fillRect(g.x-2.5, g.y-7, 5, 14); }
+  for (const g of S.gems){   // power-up drops: spinning hex badge with an icon, blinking before they vanish
+    if (g.kind !== 'pu' || (g.life < 4 && Math.floor(now*8) % 2)) continue;
+    const T = CONFIG.powerups.types[g.pu]; if (!T) continue;
+    const sp = sprite('hex', T.color, 12), y = g.y + Math.sin(now*3 + g.bob)*2;
+    ctx.save(); ctx.translate(g.x, y); ctx.rotate(now*1.2); ctx.drawImage(sp.cv, -sp.h, -sp.h, sp.h*2, sp.h*2); ctx.restore();
+    ctx.fillStyle = T.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 10px "Chakra Petch", ui-monospace, sans-serif'; ctx.fillText(T.icon, g.x, y + .5); ctx.textBaseline = 'alphabetic';
+  }
   for (const g of S.gems){
     if (g.kind !== 'chest') continue;
     const sp = sprite('square', COL.amber, 11);
@@ -1358,6 +1412,8 @@ function render(dt){
   ctx.globalCompositeOperation = 'lighter';
   // player bullets
   ctx.lineCap = 'round';
+  ctx.beginPath(); for (const b of S.bullets) if (!b.big && b.od){ ctx.moveTo(b.x - b.vx*.034, b.y - b.vy*.034); ctx.lineTo(b.x, b.y); }
+  ctx.strokeStyle = 'rgba(255,77,255,.55)'; ctx.lineWidth = 10; ctx.stroke();
   ctx.beginPath(); for (const b of S.bullets) if (!b.big && b.boost){ ctx.moveTo(b.x - b.vx*.03, b.y - b.vy*.03); ctx.lineTo(b.x, b.y); }
   ctx.strokeStyle = 'rgba(255,194,61,.5)'; ctx.lineWidth = 8; ctx.stroke();
   ctx.beginPath(); for (const b of S.bullets) if (!b.big){ ctx.moveTo(b.x - b.vx*.022, b.y - b.vy*.022); ctx.lineTo(b.x, b.y); }
@@ -1399,6 +1455,16 @@ function render(dt){
     ctx.beginPath(); ctx.moveTo(P.x + Math.cos(aim)*(P.r+8), P.y + Math.sin(aim)*(P.r+8));
     ctx.lineTo(P.x + Math.cos(aim+.35)*(P.r+3), P.y + Math.sin(aim+.35)*(P.r+3)); ctx.lineTo(P.x + Math.cos(aim-.35)*(P.r+3), P.y + Math.sin(aim-.35)*(P.r+3));
     ctx.closePath(); ctx.fillStyle = S.color; ctx.fill();
+  }
+  // shield power-up bubble
+  if (alive && S.pu.shield > 0){
+    const ending = S.pu.shield < 2.5 && Math.floor(now*8) % 2;
+    if (!ending){
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(233,251,255,.08)'; ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 20, 0, TAU); ctx.fill();
+      ctx.strokeStyle = `rgba(233,251,255,${.55 + .25*Math.sin(now*6)})`; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    }
   }
   // juggernaut shield
   if (alive && S.shieldT > 0){ ctx.strokeStyle = `rgba(63,243,255,${.4 + .4*Math.sin(now*18)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 16, 0, TAU); ctx.stroke(); }
@@ -1522,7 +1588,7 @@ function render(dt){
 }
 
 /* ---------- HUD ---------- */
-const hud = { ov:$('ovBtn'), ovCount:$('ovCount'), ovFill:$('ovFill'), hpFill:$('hpFill'), hpText:$('hpText'), lv:$('lvText'), xp:$('xpFill'), timer:$('timer'), lbl:$('clockLbl'), kills:$('kills'), ammo:$('ammo') };
+const hud = { pus:$('pus'), ov:$('ovBtn'), ovCount:$('ovCount'), ovFill:$('ovFill'), hpFill:$('hpFill'), hpText:$('hpText'), lv:$('lvText'), xp:$('xpFill'), timer:$('timer'), lbl:$('clockLbl'), kills:$('kills'), ammo:$('ammo') };
 let hudCache = {};
 function setText(el, key, v){ if (hudCache[key] !== v){ hudCache[key] = v; el.textContent = v; } }
 function updateHud(){
@@ -1530,6 +1596,11 @@ function updateHud(){
   hud.hpFill.style.transform = `scaleX(${Math.max(0, P.hp/P.maxHp)})`;
   setText(hud.hpText, 'hp', `${Math.ceil(P.hp)} / ${P.maxHp}`);
   setText(hud.lv, 'lv', 'LV ' + S.level);
+  const PT = CONFIG.powerups.types, chips = [];
+  if (S.pu.shield > 0) chips.push(`<span style="color:${PT.shield.color}">SHIELD ${Math.ceil(S.pu.shield)}s</span>`);
+  if (S.pu.overdrive > 0) chips.push(`<span style="color:${PT.overdrive.color}">2X DMG ${S.pu.overdrive}</span>`);
+  if (S.pu.bottomless > 0) chips.push(`<span style="color:${PT.bottomless.color}">NO AMMO USE ${Math.ceil(S.pu.bottomless)}s</span>`);
+  const html = chips.join(''); if (hudCache.pus !== html){ hudCache.pus = html; hud.pus.innerHTML = html; }
   hud.xp.style.width = (S.xp / S.xpNext * 100) + '%';
   setText(hud.lbl, 'lbl', S.bossPhase ? 'FINAL WAVE' : 'SURVIVE');
   setText(hud.timer, 'tm', S.bossPhase ? 'BOSS' : fmt(S.timeLeft));
@@ -1812,6 +1883,7 @@ const CHEATS = [
     for (const id of evo.needs){ const u = upgradeById(id); while ((S.upgrades[id] || 0) < u.max){ u.apply(); S.upgrades[id] = (S.upgrades[id] || 0) + 1; } }
     S.level++; S.pending++; return `${evo.name} offered when you resume`;
   }],
+  [() => 'DROP POWER-UPS', () => { const P = S.player, ts = Object.keys(CONFIG.powerups.types); ts.forEach((t, i) => { const a = i/ts.length*TAU; dropPowerup(P.x + Math.cos(a)*90, P.y + Math.sin(a)*90, t); }); return 'One of each dropped around you'; }],
   [() => '+1 OVERLOAD', () => { S.ovCharges = Math.min(CONFIG.overload.maxCharges, S.ovCharges + 1); return `${S.ovCharges} Overload charge${S.ovCharges > 1 ? 's' : ''}`; }],
   [() => '+100 SHARDS', () => { SAVE.shards += 100; persist(); return `${SAVE.shards} shards`; }],
 ];
