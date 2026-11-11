@@ -59,6 +59,18 @@ body{font-family:var(--ui);-webkit-user-select:none;user-select:none;-webkit-tou
 .btns button{pointer-events:auto;font-family:var(--ui);font-weight:700;font-size:11px;letter-spacing:.12em;color:var(--text);background:rgba(7,6,15,.6);border:1px solid var(--line);border-radius:4px;padding:8px 11px;cursor:pointer}
 button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 #debug{place-items:start center}
+#shop{place-items:start center}
+.shophead{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;justify-content:center}
+.tabs .ghost[aria-selected="true"]{color:var(--ink);background:var(--cyan);border-color:var(--cyan)}
+.lslots{display:flex;flex-direction:column;gap:10px;width:min(680px,100%)}
+.lslot{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px;align-items:stretch}
+.lslot .arrow{font-size:16px;padding:0 14px}
+.lslot .linfo{display:flex;flex-direction:column;gap:4px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;min-width:0}
+.lslot .linfo .ds{font-size:12px;color:var(--dim);line-height:1.35}
+.lslot .linfo .nm{font-weight:700;font-size:15px}
+.lslot .linfo .tag{font-size:9px;letter-spacing:.24em;color:var(--amber)}
+.lslot .buy{min-width:130px}
+.lslot.locked .linfo{opacity:.6}
 .dbg{width:100%;max-width:920px;gap:10px}
 .dbghead{display:flex;align-items:baseline;gap:14px}
 .dbgrows{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 16px;width:100%}
@@ -121,15 +133,15 @@ h2{font-family:var(--display);font-weight:400;margin:0;font-size:clamp(24px,6vh,
 .card .nm{font-weight:700;font-size:15px;letter-spacing:.04em;display:flex;align-items:center;gap:7px}
 .card .nm i{width:10px;height:10px;border-radius:50%;box-shadow:0 0 8px currentColor;background:currentColor}
 .card .ds{font-size:12px;color:var(--dim);line-height:1.35}
-.card .pips{display:flex;gap:3px;margin-top:2px}
-.card .pips i{width:10px;height:4px;background:var(--line);border-radius:1px}
-.card .pips i.on{background:var(--cyan);box-shadow:0 0 5px var(--cyan)}
+.card .pips, .lslot .pips{display:flex;gap:3px;margin-top:2px}
+.card .pips i, .lslot .pips i{width:10px;height:4px;background:var(--line);border-radius:1px}
+.card .pips i.on, .lslot .pips i.on{background:var(--cyan);box-shadow:0 0 5px var(--cyan)}
 .card .hint{font-size:10px;letter-spacing:.04em;color:var(--violet);line-height:1.3}
 .card.evo{border-color:var(--amber);box-shadow:0 0 18px rgba(255,194,61,.35);background:linear-gradient(160deg,rgba(255,194,61,.12),var(--panel) 55%)}
 .card.evo .tag{color:var(--ink);background:var(--amber);padding:2px 6px;border-radius:2px}
 .card.evo .hint{color:var(--amber)}
 .cards.ships .card{width:min(180px,21vw)}
-.cards.shop .card{width:min(210px,27vw)}
+.cards.shop .card{width:min(188px,22vw);min-width:150px;padding:9px 11px 9px}
 
 #rotate{display:none;position:fixed;inset:0;place-items:center;background:var(--ink);text-align:center;padding:24px;z-index:20}
 #rotate .ph{width:46px;height:78px;border:2px solid var(--cyan);border-radius:8px;margin:0 auto 18px;box-shadow:0 0 16px rgba(63,243,255,.5);animation:turn 2.2s ease-in-out infinite}
@@ -183,10 +195,11 @@ body.portrait #rotate{display:grid}
 
 <div class="screen" id="shop" hidden>
   <div class="box">
-    <h2>UPGRADES</h2>
-    <div class="shardline"><span id="shopShards">0</span> SHARDS</div>
-    <div class="small">Permanent bonuses for every run</div>
+    <div class="shophead"><h2>UPGRADES</h2><div class="shardline"><span id="shopShards">0</span> SHARDS</div></div>
+    <div class="row tabs"><button class="ghost" id="tabPerks" type="button">PERKS</button><button class="ghost" id="tabLoadout" type="button">LOADOUT</button></div>
+    <div class="small" id="shopNote">Permanent bonuses for every run</div>
     <div class="cards shop" id="shopCards"></div>
+    <div class="lslots" id="loadoutRows" hidden></div>
     <button class="ghost" id="shopBack" type="button">BACK</button>
   </div>
 </div>
@@ -249,7 +262,7 @@ body.portrait #rotate{display:grid}
 /* =====================================================================
    NEON ARENA — tweak everything here
    ===================================================================== */
-const BUILD = 26;   // bump by 1 on every push that changes this file, so the menu shows which version is running
+const BUILD = 27;   // bump by 1 on every push that changes this file, so the menu shows which version is running
 
 const CONFIG = {
   runSeconds: 600,              // survive this long, then the boss arrives
@@ -288,7 +301,20 @@ const CONFIG = {
     { id:'magnet', name:'Collector',    desc:'+12% pickup radius',         max:3, cost:15 },
     { id:'reroll', name:'Reroll Chip',  desc:'+1 level-up reroll per run', max:3, cost:40 },
     { id:'greed',  name:'Shard Siphon', desc:'+15% shards earned',         max:3, cost:35 },
+    { id:'steady',   name:'Steady Hands',  desc:'Perfect-reload zone 20% wider',                 max:3, cost:25 },
+    { id:'gunsmith', name:'Gunsmith',      desc:'Perfect reloads give +10% more damage',         max:3, cost:30 },
+    { id:'forgive',  name:'Second Chance', desc:'Your first fumble each reload is forgiven',     max:1, cost:120 },
+    { id:'deepmag',  name:'Deep Mag',      desc:'+1 round per magazine',                         max:3, cost:30 },
+    { id:'thrust',   name:'Ion Drive',     desc:'+4% move speed',                                max:5, cost:20 },
+    { id:'lucky',    name:'Scavenger',     desc:'+30% power-up drop chance',                     max:3, cost:25 },
+    { id:'fuse',     name:'Long Fuse',     desc:'Power-ups last 20% longer',                     max:3, cost:25 },
+    { id:'charger',  name:'Capacitor',     desc:'+1 Overload charge at the start of each run',   max:2, cost:60 },
+    { id:'head',     name:'Head Start',    desc:'Start each run with +1 level-up',               max:2, cost:50 },
+    { id:'wind',     name:'Second Wind',   desc:'Once per run, survive a killing blow at 50% HP', max:1, cost:250 },
   ],
+  // Loadout: buy starter slots. Each slot starts every run with a chosen upgrade at the slot's level.
+  // levelCosts[slot][level-1] = shard price of that level (the first level unlocks the slot).
+  loadout: { levelCosts: [[50, 100, 200], [150, 250, 400]] },
   shards: { perKills: 8, perSeconds: 15, win: 60 },
 
   orbital: { radius: 62, spin: 3.2, damage: 9, hitEvery: 0.35 },
@@ -415,13 +441,14 @@ const fmt = s => { s = Math.max(0, Math.ceil(s)); return Math.floor(s/60) + ':' 
 function compact(arr){ let j=0; for (let i=0;i<arr.length;i++){ if(!arr[i].dead) arr[j++]=arr[i]; } arr.length=j; }
 
 /* ---------- save data ---------- */
-const DEFAULT_SAVE = { shards:0, best:{ time:0, kills:0 }, wins:0, ship:'striker', owned:['striker'], perks:{},
+const DEFAULT_SAVE = { loadout:[{ id:null, lvl:0 }, { id:null, lvl:0 }], shards:0, best:{ time:0, kills:0 }, wins:0, ship:'striker', owned:['striker'], perks:{},
   settings:{ aim:'device', musicVol:.6, sfxVol:.9, sound:true, vibrate:true, shake:true, damageNumbers:true, fps:false } };
 function loadSave(){
   const s = JSON.parse(JSON.stringify(DEFAULT_SAVE));
   try {
     const raw = JSON.parse(localStorage.getItem('neonArena.save'));
-    if (raw){ Object.assign(s, raw); s.best = { ...DEFAULT_SAVE.best, ...raw.best }; s.settings = { ...DEFAULT_SAVE.settings, ...raw.settings }; s.perks = { ...raw.perks }; s.owned = raw.owned || ['striker']; }
+    if (raw){ Object.assign(s, raw); s.best = { ...DEFAULT_SAVE.best, ...raw.best }; s.settings = { ...DEFAULT_SAVE.settings, ...raw.settings }; s.perks = { ...raw.perks }; s.owned = raw.owned || ['striker'];
+      s.loadout = DEFAULT_SAVE.loadout.map((d, i) => ({ ...d, ...(raw.loadout?.[i] || {}) })); }
     else { const old = JSON.parse(localStorage.getItem('neonArena.best')); if (old) s.best = old; }
   } catch {}
   if (!CONFIG.ships[s.ship]) s.ship = 'striker';
@@ -652,19 +679,28 @@ function newGame(){
   const P = CONFIG.player, ship = CONFIG.ships[SAVE.ship] || CONFIG.ships.striker, pk = SAVE.perks;
   const gun = { ...CONFIG.gun, ...ship.gun };
   gun.reloadTime *= Math.pow(0.94, pk.reload || 0);
+  gun.magSize += pk.deepmag || 0;
   const maxHp = (ship.hp || P.maxHp) + 10*(pk.hull || 0);
   S = {
     state:'menu', t:0, timeLeft:CONFIG.runSeconds, kills:0, level:1, xp:0, xpNext:CONFIG.xp.first, pending:0,
     color:ship.color, ship:SAVE.ship,
-    player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
+    player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1)*(1 + 0.04*(pk.thrust || 0)), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
     gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, reloadLen:1, rlZone:0, rlSize:0, rlMissed:true, boosted:false, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
-    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, pu:{ shield:0, overdrive:0, bottomless:0 }, ovCharges:CONFIG.overload.startCharges, ovKills:0, ovCd:0, wave:null,
+    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, pu:{ shield:0, overdrive:0, bottomless:0 }, ovCharges:Math.min(CONFIG.overload.maxCharges, CONFIG.overload.startCharges + (pk.charger || 0)), wind:pk.wind || 0, rlForgiven:false, ovKills:0, ovCd:0, wave:null,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
     shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, midBoss:null, midSpawned:false,
     finalKind:CONFIG.finalBosses.pick[Math.floor(Math.random()*CONFIG.finalBosses.pick.length)], endT:0, endWon:false,
   };
+  // Loadout slots: start with the chosen upgrades already taken
+  for (const slot of SAVE.loadout){
+    const u = slot.lvl > 0 && slot.id && upgradeById(slot.id);
+    if (!u || u.evo) continue;
+    for (let k = 0; k < Math.min(slot.lvl, u.max); k++){ u.apply(); S.upgrades[u.id] = (S.upgrades[u.id] || 0) + 1; }
+  }
+  S.ammo = S.gun.magSize;
+  for (let k = 0; k < (pk.head || 0); k++){ S.level++; S.pending++; S.xpNext = Math.round(S.xpNext*CONFIG.xp.growth + CONFIG.xp.add); }
 }
 newGame();
 window.NEON = { CONFIG, UPGRADES, SAVE, get S(){ return S; } };   // poke at it from the console
@@ -800,22 +836,25 @@ function tap(){
   if (S.cooldown > 0){ S.queued = true; return; }
   fire();
 }
-const boostMul = () => S.boosted ? CONFIG.speedReload.perfectDamage : 1;
+const perfectMul = () => CONFIG.speedReload.perfectDamage + 0.1*(SAVE.perks.gunsmith || 0);
+const perfectPct = () => Math.round((perfectMul() - 1)*100);
+const boostMul = () => S.boosted ? perfectMul() : 1;
 const odMul = () => S.pu.overdrive > 0 ? CONFIG.powerups.types.overdrive.damageMul : 1;
 const reloadProg = () => Math.max(0, 1 - S.reloadT/(S.reloadLen || S.gun.reloadTime));
 function startReload(){
   const G = S.gun, SR = CONFIG.speedReload;
   S.reloading = true; S.reloadT = S.reloadLen = G.reloadTime; S.queued = false; S.boosted = false;
-  S.rlSize = Math.min(.5, Math.max(SR.zoneSize, SR.minZoneSeconds/G.reloadTime));
+  const wide = 1 + 0.2*(SAVE.perks.steady || 0);
+  S.rlSize = Math.min(.5, Math.max(SR.zoneSize, SR.minZoneSeconds/G.reloadTime)*wide);
   S.rlZone = Math.min(rand(SR.zoneMin, SR.zoneMax), .97 - S.rlSize);
-  S.rlMissed = !SR.enabled;
+  S.rlMissed = !SR.enabled; S.rlForgiven = false;
   sfx.reloadStart();
 }
 function finishReload(perfect){
   const P = S.player;
   S.reloading = false; S.ammo = S.gun.magSize; S.freshReady = true; S.boosted = !!perfect;
   if (perfect){
-    S.texts.push({ x:P.x, y:P.y - 26, txt:`PERFECT +${Math.round((CONFIG.speedReload.perfectDamage - 1)*100)}%`, crit:true, life:.9, dead:false });
+    S.texts.push({ x:P.x, y:P.y - 26, txt:`PERFECT +${perfectPct()}%`, crit:true, life:.9, dead:false });
     ring(P.x, P.y, P.r + 22, '#ffffff', .3); sfx.perfect(); buzz(15);
   } else sfx.reload();
   if (S.evo.overflow) overflowRing();
@@ -827,6 +866,9 @@ function trySpeedReload(){
   if (p >= S.rlZone && p <= S.rlZone + S.rlSize){ finishReload(true); return true; }
   if (S.ammo > 0) return false;                   // partial mag: a normal tap still cancels the reload and fires
   const pen = CONFIG.speedReload.missPenalty, P = S.player;
+  if (SAVE.perks.forgive && !S.rlForgiven){   // Second Chance perk: first miss each reload is free
+    S.rlForgiven = true; S.texts.push({ x:P.x, y:P.y - 26, txt:'CLOSE', crit:false, life:.6, dead:false }); sfx.empty(); return true;
+  }
   S.rlMissed = true; S.reloadT += pen; S.reloadLen += pen;
   S.texts.push({ x:P.x, y:P.y - 26, txt:'FUMBLE', crit:false, life:.7, dead:false });
   sfx.fumble();
@@ -935,7 +977,7 @@ function killEnemy(e){
   if (e.xp > 0) dropGem(e.x, e.y, e.xp, 'xp');
   if (!e.boss){
     if (e.elite && !e.noHeal && CONFIG.powerups.eliteDrop) dropPowerup(e.x - 14, e.y);
-    else if (!e.elite && Math.random() < CONFIG.powerups.dropChance) dropPowerup(e.x, e.y);
+    else if (!e.elite && Math.random() < CONFIG.powerups.dropChance*(1 + 0.3*(SAVE.perks.lucky || 0))) dropPowerup(e.x, e.y);
   }
   if (e.elite && !e.boss && !e.noHeal){ dropGem(e.x + 12, e.y, 30, 'heal'); if (SET.shake) S.shake = Math.min(16, S.shake + 6); S.hitstop = .06; }
   for (let i=0;i<e.splits;i++){ const a = i/e.splits*TAU, c = spawnEnemy(e.splitInto, e.x + Math.cos(a)*8, e.y + Math.sin(a)*8); c.kx = Math.cos(a)*160; c.ky = Math.sin(a)*160; c.spawnT = 0; }
@@ -959,11 +1001,11 @@ function dropPowerup(x, y, type){
   S.gems.push({ x, y, v:0, kind:'pu', pu:type, life:PU.life, mag:false, dead:false, bob:rand(0,6) });
 }
 function collectPowerup(type){
-  const T = CONFIG.powerups.types[type], P = S.player;
+  const T = CONFIG.powerups.types[type], P = S.player, fuse = 1 + 0.2*(SAVE.perks.fuse || 0);
   if (!T) return;
-  if (type === 'shield') S.pu.shield = T.seconds;
-  else if (type === 'overdrive') S.pu.overdrive += T.shots;
-  else if (type === 'bottomless'){ S.pu.bottomless = T.seconds; S.ammo = S.gun.magSize; S.reloading = false; }
+  if (type === 'shield') S.pu.shield = T.seconds*fuse;
+  else if (type === 'overdrive') S.pu.overdrive += Math.round(T.shots*fuse);
+  else if (type === 'bottomless'){ S.pu.bottomless = T.seconds*fuse; S.ammo = S.gun.magSize; S.reloading = false; }
   else if (type === 'magnet') for (const g of S.gems) if (g.kind === 'xp') g.mag = true;
   S.texts.push({ x:P.x, y:P.y - 30, txt:T.name, crit:true, life:1.1, dead:false });
   ring(P.x, P.y, 70, T.color, .45); burst(P.x, P.y, T.color, 18, 220); sfx.powerup(); buzz(20);
@@ -983,6 +1025,11 @@ function hurt(dmg){
   if (SET.shake) S.shake = Math.min(16, S.shake + 9);
   S.hitstop = Math.max(S.hitstop, .04);
   burst(P.x, P.y, COL.pink, 14, 240); sfx.hurt(); buzz(40);
+  if (P.hp <= 0 && S.wind > 0){   // Second Wind perk
+    S.wind--; P.hp = P.maxHp*.5; P.invuln = 2.5; levelBlast(); S.flash = .4;
+    S.banner = { txt:'SECOND WIND', sub:'BACK IN THE FIGHT', life:1.8 }; sfx.win(); buzz([60,40,60]);
+    return;
+  }
   if (P.hp <= 0){ P.hp = 0; beginEnd(false); }
 }
 function addXp(v){
@@ -1606,7 +1653,7 @@ function updateHud(){
   setText(hud.timer, 'tm', S.bossPhase ? 'BOSS' : fmt(S.timeLeft));
   hud.timer.classList.toggle('boss', S.bossPhase);
   setText(hud.kills, 'k', S.kills + ' KILLS');
-  setText(hud.ammo, 'am', S.reloading ? 'RELOADING' : `${S.boosted ? '+' + Math.round((CONFIG.speedReload.perfectDamage - 1)*100) + '% ' : ''}${S.ammo} / ${S.gun.magSize}`);
+  setText(hud.ammo, 'am', S.reloading ? 'RELOADING' : `${S.boosted ? '+' + perfectPct() + '% ' : ''}${S.ammo} / ${S.gun.magSize}`);
   hud.ammo.className = 'ammo' + (S.reloading ? ' reload' : S.ammo === 0 ? ' empty' : S.boosted ? ' boost' : '');
   const O = CONFIG.overload;
   setText(hud.ovCount, 'ov', String(S.ovCharges));
@@ -1663,6 +1710,34 @@ function refreshMenu(){
 }
 function toMenu(){ saveRun(); newGame(); resetJoy(); refreshMenu(); show('menu'); }
 
+const LOADOUT_POOL = () => UPGRADES.filter(u => !u.evo);
+function cycleLoadout(i, dir){
+  const slot = SAVE.loadout[i], other = SAVE.loadout[1 - i]?.id;
+  const pool = LOADOUT_POOL().filter(u => u.id !== other);
+  let k = pool.findIndex(u => u.id === slot.id);
+  k = k < 0 ? 0 : (k + dir + pool.length) % pool.length;
+  slot.id = pool[k].id; persist(); newGame(); keepFocus(buildShop);
+}
+function buildLoadout(){
+  const box = $('loadoutRows'); box.innerHTML = '';
+  SAVE.loadout.forEach((slot, i) => {
+    if (!slot.id){ const other = SAVE.loadout[1 - i]?.id; slot.id = LOADOUT_POOL().find(u => u.id !== other).id; }
+    const u = upgradeById(slot.id), costs = CONFIG.loadout.levelCosts[i], maxed = slot.lvl >= costs.length;
+    const cost = maxed ? 0 : costs[slot.lvl], afford = SAVE.shards >= cost;
+    const row = document.createElement('div'); row.className = 'lslot' + (slot.lvl ? '' : ' locked');
+    const mk = (txt, cls, label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost ' + cls; b.textContent = txt; b.setAttribute('aria-label', label); b.addEventListener('click', fn); return b; };
+    const info = document.createElement('div'); info.className = 'linfo';
+    info.innerHTML = `<span class="tag">SLOT ${i + 1} · ${slot.lvl ? 'STARTS AT LEVEL ' + Math.min(slot.lvl, u.max) : 'LOCKED'}</span><span class="nm">${u.name}</span><span class="ds">${u.desc}</span>${pips(costs.length, slot.lvl)}`;
+    const buy = mk(maxed ? 'MAXED' : `${slot.lvl ? 'LEVEL ' + (slot.lvl + 1) : 'UNLOCK'} · ${cost}`, 'buy', `Slot ${i + 1}: ${maxed ? 'maxed' : 'buy for ' + cost + ' shards'}`, () => {
+      if (maxed || !afford) return;
+      SAVE.shards -= cost; slot.lvl++; persist(); sfx.buy(); newGame(); keepFocus(buildShop);
+    });
+    if (!maxed && !afford) buy.style.opacity = .55;
+    row.append(mk('◀', 'arrow', `Slot ${i + 1}: previous upgrade`, () => cycleLoadout(i, -1)), info, mk('▶', 'arrow', `Slot ${i + 1}: next upgrade`, () => cycleLoadout(i, 1)), buy);
+    box.appendChild(row);
+  });
+  persist();
+}
 function buildShips(){
   $('shipShards').textContent = SAVE.shards;
   const box = $('shipCards'); box.innerHTML = '';
@@ -1678,8 +1753,14 @@ function buildShips(){
     box.appendChild(b);
   }
 }
+let shopTab = 'perks';
 function buildShop(){
   $('shopShards').textContent = SAVE.shards;
+  const perks = shopTab === 'perks';
+  $('tabPerks').setAttribute('aria-selected', String(perks)); $('tabLoadout').setAttribute('aria-selected', String(!perks));
+  $('shopCards').hidden = !perks; $('loadoutRows').hidden = perks;
+  $('shopNote').textContent = perks ? 'Permanent bonuses for every run' : 'Start every run with these upgrades already taken';
+  if (!perks){ buildLoadout(); return; }
   const box = $('shopCards'); box.innerHTML = '';
   for (const p of CONFIG.perks){
     const lv = SAVE.perks[p.id] || 0, maxed = lv >= p.max, cost = p.cost*(lv+1), afford = SAVE.shards >= cost;
@@ -1790,6 +1871,8 @@ $('shipsBtn').addEventListener('click', () => { buildShips(); show('ships'); });
 $('shopBtn').addEventListener('click', () => { buildShop(); show('shop'); });
 $('shipsBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
 $('shopBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
+$('tabPerks').addEventListener('click', () => { shopTab = 'perks'; keepFocus(buildShop); });
+$('tabLoadout').addEventListener('click', () => { shopTab = 'loadout'; keepFocus(buildShop); });
 $('optionsBtn').addEventListener('click', () => { buildToggles(); show('options'); });
 $('optionsBack').addEventListener('click', () => { refreshMenu(); show('menu'); });
 // HUD buttons act on finger-down. Android never sends a "click" for a tap made while another
