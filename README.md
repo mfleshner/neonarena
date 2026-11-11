@@ -11,6 +11,7 @@ A landscape phone survivor shooter in a single HTML file, in the spirit of 20 Mi
 - Options → Aim: by device (auto on touch, manual with mouse or controller), always auto, or always manual
 - Overload: every run starts with 1 charge, and every 1,000 kills earns another (up to 3). Tap the OVERLOAD button, press Y on a controller, or N on a keyboard to destroy every enemy on screen
 - Power-up drops (elites always drop one, regular enemies rarely): Shield (10s invincible), Overdrive (next 30 shots deal double damage), Magnet (pulls in all XP), Bottomless (8s of shots that use no ammo). They vanish after 20s
+- Momentum: every 30s without taking damage gives +10% damage (max +100%). Getting hit resets it
 - Survive 10:00, then destroy the Overseer
 
 ## Play

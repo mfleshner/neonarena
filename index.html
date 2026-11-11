@@ -262,7 +262,7 @@ body.portrait #rotate{display:grid}
 /* =====================================================================
    NEON ARENA — tweak everything here
    ===================================================================== */
-const BUILD = 27;   // bump by 1 on every push that changes this file, so the menu shows which version is running
+const BUILD = 28;   // bump by 1 on every push that changes this file, so the menu shows which version is running
 
 const CONFIG = {
   runSeconds: 600,              // survive this long, then the boss arrives
@@ -357,6 +357,8 @@ const CONFIG = {
       bottomless: { name:'BOTTOMLESS', color:'#5d9bff', icon:'∞',  weight:2, seconds:8 },    // shots use no ammo
     },
   },
+  // Momentum: +perStack damage for every `every` seconds without taking damage, up to maxStacks. Any damage resets it.
+  momentum: { every: 30, perStack: 0.1, maxStacks: 10 },
   // Nanites upgrade: HP per second per level, paused for a moment after you take damage
   nanites: { perLevel: 0.4, pauseAfterHit: 3 },
   overload: { startCharges: 1, killsPerCharge: 1000, maxCharges: 3, bossDamage: 0.1, cooldown: 1.5 },
@@ -548,6 +550,7 @@ const sfx = {
   fumble(){ noise(.06, .08, 'bandpass', 700, 0, 0, 4); tone(120, .12, 'square', .04, .7); },
   powerup(){ [784,1047,1319].forEach((f,i) => tone(f, .12, 'square', .03, 1.02, i*.05)); noise(.2, .04, 'highpass', 3000, 0, 8000); },
   bubble(){ tone(900, .06, 'sine', .04, 1.8); },
+  momentum(){ tone(523, .08, 'triangle', .035, 1.5); tone(784, .12, 'triangle', .035, 1.2, .07); },
   ovReady(){ tone(660, .1, 'triangle', .04, 1.5); tone(990, .14, 'triangle', .04, 1.3, .08); },
   overload(){ noise(.25, .1, 'bandpass', 400, 0, 6000, 2); noise(1.1, .16, 'lowpass', 4000, .1, 60); tone(1600, .5, 'sawtooth', .05, .05, .05); tone(48, 1, 'sine', .3, .5, .08); },
   death(){ noise(1.2, .14, 'lowpass', 3000, 0, 80); tone(220, 1, 'sawtooth', .06, .2); tone(55, .9, 'sine', .2, .6); },
@@ -687,7 +690,7 @@ function newGame(){
     player:{ x:0, y:0, r:P.radius, hp:maxHp, maxHp, speed:P.speed*(ship.speedMul || 1)*(1 + 0.04*(pk.thrust || 0)), invuln:0, face:0, regen:0, pickup:P.pickupRadius*(1 + 0.12*(pk.magnet || 0)) },
     gun, dmgMul:1 + 0.06*(pk.power || 0), ammo:gun.magSize, reloading:false, reloadT:0, reloadLen:1, rlZone:0, rlSize:0, rlMissed:true, boosted:false, idle:0, cooldown:0, queued:false, aim:0,
     crit:0, lastRound:0, fresh:0, freshReady:true, nova:0, novaT:CONFIG.nova.every, rerolls:pk.reroll || 0,
-    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, pu:{ shield:0, overdrive:0, bottomless:0 }, ovCharges:Math.min(CONFIG.overload.maxCharges, CONFIG.overload.startCharges + (pk.charger || 0)), wind:pk.wind || 0, rlForgiven:false, ovKills:0, ovCd:0, wave:null,
+    orbitals:ship.orbitals || 0, orbAngle:0, upgrades:{}, evo:{}, trails:[], bladeCd:[], juggCd:0, shieldT:0, pu:{ shield:0, overdrive:0, bottomless:0 }, ovCharges:Math.min(CONFIG.overload.maxCharges, CONFIG.overload.startCharges + (pk.charger || 0)), wind:pk.wind || 0, momStart:0, momentum:0, rlForgiven:false, ovKills:0, ovCd:0, wave:null,
     enemies:[], bullets:[], eshots:[], gems:[], parts:[], texts:[], rings:[], ripples:[],
     spawnAcc:0, nextBurst:CONFIG.spawn.burstEvery, nextElite:CONFIG.spawn.eliteEvery,
     shake:0, hitstop:0, flash:0, banner:null, bossPhase:false, boss:null, midBoss:null, midSpawned:false,
@@ -962,7 +965,9 @@ function eshot(x, y, a, sp, dmg, life = 4, r = 5){ if (S.eshots.length < 400){ c
 function addPart(x,y,a,sp,life,color,size){ if (S.parts.length > 520) return; S.parts.push({ x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life, max:life, color, size, dead:false }); }
 function burst(x,y,color,n,sp=200){ for (let i=0;i<n;i++) addPart(x,y,rand(0,TAU),rand(sp*.3,sp),rand(.25,.55),color,rand(1.5,3)); }
 function ring(x,y,R,color,life){ if (S.rings.length < 80) S.rings.push({ x, y, R, color, life, max:life, dead:false }); }
-function damageEnemy(e, dmg, nx, ny, crit=false){
+const momentumMul = () => 1 + S.momentum*CONFIG.momentum.perStack;
+function damageEnemy(e, dmg, nx, ny, crit=false, raw=false){
+  if (!raw) dmg *= momentumMul();
   if (e.dead) return;
   e.hp -= dmg; e.flash = .07;
   const kb = CONFIG.gun.knockback * (e.boss ? 0 : e.elite ? .15 : 1); e.kx += nx*kb; e.ky += ny*kb;
@@ -1017,7 +1022,8 @@ function dropGem(x,y,v,kind){
 function hurt(dmg){
   const P = S.player; if (P.invuln > 0 || S.state !== 'play' || S.god) return;
   if (S.pu.shield > 0){ if (allow('bubble', 1, 150)) sfx.bubble(); return; }
-  P.hp -= dmg; P.invuln = CONFIG.player.invulnTime; S.lastHurt = S.t;
+  P.hp -= dmg; P.invuln = CONFIG.player.invulnTime; S.lastHurt = S.t; S.momStart = S.t;
+  if (S.momentum > 0){ S.texts.push({ x:P.x, y:P.y - 30, txt:'MOMENTUM LOST', crit:false, life:.9, dead:false }); S.momentum = 0; }
   const J = CONFIG.evolutions.jugg;
   if (S.evo.jugg && P.hp > 0 && P.hp/P.maxHp < .3 && S.juggCd <= 0){
     P.invuln = S.shieldT = J.shieldTime; S.juggCd = J.cooldown; ring(P.x, P.y, 90, COL.cyan, .6); sfx.nova();
@@ -1066,7 +1072,7 @@ function activateOverload(){
   const onScreen = (x, y, r) => Math.abs(x - P.x) <= hw + r && Math.abs(y - P.y) <= hh + r;
   for (const e of S.enemies){   // splitter shards spawned mid-loop are on screen too, so they go as well
     if (e.dead || !onScreen(e.x, e.y, e.r)) continue;
-    if (e.boss){ damageEnemy(e, e.maxHp*O.bossDamage, 0, 0); continue; }
+    if (e.boss){ damageEnemy(e, e.maxHp*O.bossDamage, 0, 0, false, true); continue; }
     killEnemy(e);
   }
   for (const s of S.eshots) if (onScreen(s.x, s.y, 0)) s.dead = true;
@@ -1226,6 +1232,12 @@ function update(dt){
   P.invuln = Math.max(0, P.invuln - dt);
   S.juggCd = Math.max(0, S.juggCd - dt); S.shieldT = Math.max(0, S.shieldT - dt); S.ovCd = Math.max(0, S.ovCd - dt);
   S.pu.shield = Math.max(0, S.pu.shield - dt); S.pu.bottomless = Math.max(0, S.pu.bottomless - dt);
+  const MO = CONFIG.momentum, stacks = Math.min(MO.maxStacks, Math.floor((S.t - S.momStart)/MO.every));
+  if (stacks > S.momentum){
+    S.momentum = stacks;
+    S.texts.push({ x:P.x, y:P.y - 30, txt:`MOMENTUM +${Math.round(stacks*MO.perStack*100)}%`, crit:true, life:1, dead:false });
+    ring(P.x, P.y, 50, '#ff9d3d', .4); sfx.momentum();
+  }
   if (P.regen && S.t - (S.lastHurt ?? -99) >= CONFIG.nanites.pauseAfterHit) P.hp = Math.min(P.maxHp, P.hp + P.regen*dt);
 
   // gun + reload
@@ -1646,6 +1658,11 @@ function updateHud(){
   const PT = CONFIG.powerups.types, chips = [];
   if (S.pu.shield > 0) chips.push(`<span style="color:${PT.shield.color}">SHIELD ${Math.ceil(S.pu.shield)}s</span>`);
   if (S.pu.overdrive > 0) chips.push(`<span style="color:${PT.overdrive.color}">2X DMG ${S.pu.overdrive}</span>`);
+  { const MO = CONFIG.momentum;
+    if (S.momentum > 0 || S.t - S.momStart > 5){
+      const full = S.momentum >= MO.maxStacks, pct = full ? 100 : Math.floor(((S.t - S.momStart) % MO.every)/MO.every*100);
+      chips.push(`<span style="color:#ff9d3d;background:linear-gradient(90deg,rgba(255,157,61,.28) ${pct}%,rgba(7,6,15,.6) ${pct}%)">MOMENTUM +${Math.round(S.momentum*MO.perStack*100)}%${full ? ' MAX' : ''}</span>`);
+    } }
   if (S.pu.bottomless > 0) chips.push(`<span style="color:${PT.bottomless.color}">NO AMMO USE ${Math.ceil(S.pu.bottomless)}s</span>`);
   const html = chips.join(''); if (hudCache.pus !== html){ hudCache.pus = html; hud.pus.innerHTML = html; }
   hud.xp.style.width = (S.xp / S.xpNext * 100) + '%';
@@ -1686,7 +1703,8 @@ function clearRun(){ try { localStorage.removeItem(RUN_KEY); } catch {} }
 function continueRun(){
   const o = loadRun(); if (!o){ refreshMenu(); return; }
   audioInit(); goFullscreen();
-  newGame(); S = { ...S, ...o };   // fields added after this run was saved keep their fresh defaults
+  newGame(); S = { ...S, ...o };
+  if (o.momStart === undefined) S.momStart = S.t;   // runs saved before Momentum existed   // fields added after this run was saved keep their fresh defaults
   S.boss = o.bossIdx >= 0 ? S.enemies[o.bossIdx] || null : null; delete S.bossIdx;
   S.midBoss = o.midIdx >= 0 ? S.enemies[o.midIdx] || null : null; delete S.midIdx;
   if (S.boss && S.boss.final === undefined) S.boss.final = true;   // runs saved before boss variety
